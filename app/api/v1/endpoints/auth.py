@@ -393,6 +393,17 @@ def _verify_otp_by_purpose(
             code=payload.code,
             action_class=payload.action_class,
         )
+    if payload.purpose == OtpPurpose.DATA_EXPORT:
+        if authorization is None:
+            raise TokenError("Data export verification is unavailable.")
+        return application.verify_data_export(
+            context=application.authenticate(
+                authorization.removeprefix("Bearer ").strip(),
+                uuid4(),
+            ),
+            otp_id=payload.challenge_id,
+            code=payload.code,
+        )
     if payload.purpose in {OtpPurpose.VERIFY_EMAIL, OtpPurpose.VERIFY_PHONE}:
         if authorization is None:
             raise TokenError("Identifier verification is unavailable.")

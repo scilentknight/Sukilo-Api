@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.modules.identity.models import (
@@ -13,7 +13,7 @@ from app.modules.identity.models import (
     UserAccount,
     UserSession,
 )
-from app.modules.identity.types import OtpPurpose
+from app.modules.identity.types import GrantPurpose, OtpPurpose
 
 
 class AccountRepository:
@@ -124,6 +124,12 @@ class AccountRepository:
         statement = select(UserAccount.user_id).where(or_(*clauses)).limit(1)
         return self.db.scalar(statement) is not None
 
+    def delete_identities_by_user(self, user_id: UUID) -> None:
+        """Delete login identities owned by one account."""
+        self.db.execute(
+            delete(AuthIdentity).where(AuthIdentity.user_id == user_id)
+        )
+
 
 class OtpRepository:
     """Persist and lock OTP challenges."""
@@ -164,6 +170,18 @@ class OtpRepository:
         )
         return self.db.scalar(statement)
 
+    def invalidate_all_by_user(self, user_id: UUID, now: datetime) -> None:
+        """Invalidate every outstanding challenge owned by an account."""
+        self.db.execute(
+            update(OtpChallenge)
+            .where(
+                OtpChallenge.user_id == user_id,
+                OtpChallenge.verified_at.is_(None),
+                OtpChallenge.invalidated_at.is_(None),
+            )
+            .values(invalidated_at=now)
+        )
+
     def flush(self) -> None:
         """Flush OTP changes without committing."""
         self.db.flush()
@@ -191,6 +209,45 @@ class AuthGrantRepository:
             .with_for_update()
         )
         return self.db.scalar(statement)
+
+    def revoke_all_by_user(
+        self,
+        user_id: UUID,
+        now: datetime,
+        *,
+        except_grant_id: UUID | None = None,
+    ) -> None:
+        """Revoke every outstanding grant owned by an account."""
+        clauses = [
+            AuthGrant.user_id == user_id,
+            AuthGrant.consumed_at.is_(None),
+            AuthGrant.revoked_at.is_(None),
+        ]
+        if except_grant_id is not None:
+            clauses.append(AuthGrant.grant_id != except_grant_id)
+        self.db.execute(
+            update(AuthGrant).where(*clauses).values(revoked_at=now)
+        )
+
+    def revoke_subject_grants(
+        self,
+        user_id: UUID,
+        purpose: GrantPurpose,
+        subject_hash: str,
+        now: datetime,
+    ) -> None:
+        """Revoke outstanding grants for one purpose-bound subject."""
+        self.db.execute(
+            update(AuthGrant)
+            .where(
+                AuthGrant.user_id == user_id,
+                AuthGrant.purpose == purpose,
+                AuthGrant.subject_hash == subject_hash,
+                AuthGrant.consumed_at.is_(None),
+                AuthGrant.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
 
     def flush(self) -> None:
         """Flush grant changes without committing."""

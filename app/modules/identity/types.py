@@ -34,6 +34,7 @@ class OtpPurpose(StrEnum):
     VERIFY_EMAIL = "VERIFY_EMAIL"
     VERIFY_PHONE = "VERIFY_PHONE"
     STEP_UP = "STEP_UP"
+    DATA_EXPORT = "DATA_EXPORT"
 
 
 class GrantPurpose(StrEnum):

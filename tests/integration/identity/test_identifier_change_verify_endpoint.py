@@ -55,6 +55,11 @@ class ApplicationFake:
             raise OtpError("OTP challenge is unavailable.")
         return "opaque-change-grant"
 
+    def verify_data_export(self, **kwargs: object) -> str:
+        """Capture an authenticated export verification."""
+        self.calls.append(kwargs)
+        return "opaque-data-export-grant"
+
 
 def _client(application: ApplicationFake, database: DatabaseFake) -> TestClient:
     app = FastAPI()
@@ -106,3 +111,33 @@ def test_verify_candidate_otp_failure_is_safe_and_rolled_back() -> None:
     assert response.status_code == 400
     assert response.json()["detail"] == "OTP challenge is unavailable."
     assert database.events == ["rollback"]
+
+
+def test_verify_data_export_otp_requires_authenticated_session() -> None:
+    """Exchange an owned export OTP only on the authenticated path."""
+    application, database = ApplicationFake(), DatabaseFake()
+    response = _client(application, database).post(
+        "/api/v1/auth/otp/verify",
+        headers={"Authorization": "Bearer access-token"},
+        json=_payload("DATA_EXPORT"),
+    )
+    assert response.status_code == 200
+    assert response.json()["grant"] == "opaque-data-export-grant"
+    assert application.calls[0]["context"].session_id == UUID(int=2)
+    assert database.events == ["commit"]
+
+
+def test_public_otp_request_does_not_enable_data_export() -> None:
+    """Keep data-export OTP creation off the public request route."""
+    application, database = ApplicationFake(), DatabaseFake()
+    response = _client(application, database).post(
+        "/api/v1/auth/otp/request",
+        json={
+            "identifier": "buyer@example.com",
+            "purpose": "DATA_EXPORT",
+            "country_code": "NP",
+            "locale_code": "en-NP",
+        },
+    )
+    assert response.status_code == 400
+    assert database.events == []

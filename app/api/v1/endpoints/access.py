@@ -159,6 +159,7 @@ def revoke_assignment(
         AccessApplication,
         Depends(get_access_application),
     ],
+    country_id: Annotated[UUID | None, Query()] = None,
 ) -> AssignmentResponse:
     """Revoke a locked assignment and invalidate only after commit."""
     command = None
@@ -168,6 +169,7 @@ def revoke_assignment(
             assignment_id=assignment_id,
             reason=payload.reason,
             step_up_token=step_up_token,
+            country_id=country_id,
         )
         view = application.assignments.revoke_assignment(command)
         db.commit()

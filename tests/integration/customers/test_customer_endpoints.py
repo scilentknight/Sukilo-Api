@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -17,6 +18,12 @@ from app.modules.customers.identifier_change import (
     IdentifierChangeInvalidError,
     IdentifierChangeUnavailableError,
     IdentifierChangeValidationError,
+)
+from app.modules.customers.exports import CustomerExportNotFoundError
+from app.modules.customers.privacy import (
+    ClosurePreview,
+    CustomerPrivacyError,
+    RetentionNotice,
 )
 from app.modules.customers.profile import (
     CurrentSessionView,
@@ -36,7 +43,13 @@ from app.modules.customers.service import (
     PreferenceValidationError,
     PreferenceView,
 )
-from app.modules.customers.types import AddressType, ConsentSource, ConsentType, DefaultKind
+from app.modules.customers.types import (
+    AddressType,
+    ConsentSource,
+    ConsentType,
+    DataExportStatus,
+    DefaultKind,
+)
 from app.modules.identity.types import AccountStatus
 
 
@@ -235,6 +248,73 @@ class AddressesFake:
         return _address_view(is_default_shipping=True)
 
 
+class ClosureFake:
+    """Capture account closure request and confirmation."""
+
+    def __init__(self) -> None:
+        self.confirmed = False
+        self.blocked = False
+
+    def request(
+        self,
+        actor: AuthContext,
+        password: str,
+        step_up_grant: str,
+    ) -> ClosurePreview:
+        del actor, password, step_up_grant
+        return ClosurePreview(
+            close_grant="c" * 40,
+            effects=("Sessions will be revoked.",),
+            retention_notices=(RetentionNotice(COUNTRY_ID, "Retention notice."),),
+        )
+
+    def confirm(self, actor: AuthContext, close_grant: str) -> None:
+        del actor, close_grant
+        if self.blocked:
+            raise CustomerPrivacyError("Account closure is blocked.")
+        self.confirmed = True
+
+
+class ExportsFake:
+    """Simulate idempotent owner-scoped export endpoints."""
+
+    def __init__(self) -> None:
+        self.request = SimpleNamespace(
+            export_request_id=UUID(int=50),
+            status=DataExportStatus.PENDING,
+        )
+
+    def request_verification(
+        self,
+        actor: AuthContext,
+        password: str,
+        locale_code: str,
+    ) -> UUID:
+        del actor, password, locale_code
+        return UUID(int=49)
+
+    def request_export(
+        self,
+        actor: AuthContext,
+        country_code: str,
+        idempotency_key: str,
+        grant: str,
+    ) -> object:
+        del actor, country_code, idempotency_key, grant
+        return self.request
+
+    def get_status(self, actor: AuthContext, export_request_id: UUID) -> object:
+        if actor.user_id != USER_ID or export_request_id != UUID(int=50):
+            raise CustomerExportNotFoundError("Export request is unavailable.")
+        return SimpleNamespace(
+            export_request_id=export_request_id,
+            status=DataExportStatus.PENDING,
+            requested_at=NOW,
+            completed_at=None,
+            downloaded_at=None,
+        )
+
+
 class ApplicationFake:
     """Expose customer services used by tested routes."""
 
@@ -244,6 +324,8 @@ class ApplicationFake:
         self.preferences = PreferencesFake()
         self.consents = ConsentsFake()
         self.addresses = AddressesFake()
+        self.closure = ClosureFake()
+        self.exports = ExportsFake()
 
 
 def _consent_view() -> ConsentView:
@@ -517,6 +599,57 @@ def test_cross_owner_address_lookup_returns_not_found() -> None:
     )
     assert response.status_code == 404
     assert response.json()["detail"] == "Address is unavailable."
+
+
+def test_closure_request_returns_preview_without_confirmation() -> None:
+    """Issue a close grant while leaving confirmation unapplied."""
+    application = ApplicationFake()
+    response = _client(application).post(
+        "/api/v1/me/closure",
+        json={"password": "current", "step_up_grant": "s" * 40},
+    )
+    assert response.status_code == 200
+    assert response.json()["close_grant"] == "c" * 40
+    assert application.closure.confirmed is False
+
+
+def test_closure_hold_maps_to_safe_conflict() -> None:
+    """Return a redacted conflict when retention policy blocks closure."""
+    application, database = ApplicationFake(), DatabaseFake()
+    application.closure.blocked = True
+    response = _client(application, database).post(
+        "/api/v1/me/closure/confirm",
+        json={"close_grant": "c" * 40},
+    )
+    assert response.status_code == 409
+    assert database.events == ["rollback"]
+
+
+def test_export_retry_returns_same_request() -> None:
+    """Return the same request identifier for an idempotent retry."""
+    client = _client()
+    payload = {"country_code": "NP", "grant": "g" * 40}
+    first = client.post(
+        "/api/v1/me/data-export",
+        headers={"Idempotency-Key": "same-key"},
+        json=payload,
+    )
+    second = client.post(
+        "/api/v1/me/data-export",
+        headers={"Idempotency-Key": "same-key"},
+        json=payload,
+    )
+    assert first.status_code == 202
+    assert second.json()["export_request_id"] == first.json()["export_request_id"]
+
+
+def test_export_status_hides_wrong_owner() -> None:
+    """Return not found for another owner's export status."""
+    response = _client(actor=_context(user_id=OTHER_USER_ID)).get(
+        f"/api/v1/me/data-exports/{UUID(int=50)}"
+    )
+    assert response.status_code == 404
+    assert "artifact_reference" not in response.text
 
 
 def _address_update_payload(**overrides: object) -> dict[str, object]:

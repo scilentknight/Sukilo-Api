@@ -6,7 +6,12 @@ from app.modules.access.models import (
     RolePermission,
     UserRoleAssignment,
 )
-from app.modules.customers.models import Address, ConsentRecord, UserPreference
+from app.modules.customers.models import (
+    Address,
+    ConsentRecord,
+    DataExportRequest,
+    UserPreference,
+)
 from app.modules.identity.models import (
     AuthGrant,
     AuthIdentity,
@@ -21,6 +26,7 @@ __all__ = [
     "AuthGrant",
     "AuthIdentity",
     "ConsentRecord",
+    "DataExportRequest",
     "OtpChallenge",
     "Permission",
     "Product",

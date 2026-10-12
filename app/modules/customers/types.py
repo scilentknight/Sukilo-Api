@@ -35,3 +35,14 @@ class DefaultKind(StrEnum):
 
     SHIPPING = "SHIPPING"
     BILLING = "BILLING"
+
+
+class DataExportStatus(StrEnum):
+    """Identify the lifecycle state of a customer data export request."""
+
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    READY = "READY"
+    FAILED = "FAILED"
+    EXPIRED = "EXPIRED"
+    DOWNLOADED = "DOWNLOADED"

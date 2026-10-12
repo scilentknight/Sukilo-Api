@@ -6,6 +6,14 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 from app.core.auth_context import AuthContext
+from app.core.database_context import (
+    ADDRESS_SOFT_DELETE_ACTION,
+    CUSTOMER_ADDRESS_ACTION,
+    CUSTOMER_CONSENT_ACTION,
+    AuthorizationMode,
+    DatabaseRequestContext,
+    bind_database_context,
+)
 from app.core.identifiers import IdentifierValidationError, normalize_phone_e164
 from app.core.transactions import DatabaseTransaction
 from app.modules.customers.models import Address, ConsentRecord, UserPreference
@@ -197,12 +205,14 @@ class AddressService:
     ) -> list[AddressView]:
         """Return active addresses for the authenticated owner and country."""
         country = self._resolve_address_country(country_code)
+        self._bind(actor, country.country_id, CUSTOMER_ADDRESS_ACTION)
         rows = self.repository.list_addresses(actor.user_id, country.country_id)
         return [_address_view(row) for row in rows]
 
     def create_address(self, command: CreateAddress) -> AddressView:
         """Create, normalize, default, and audit one address."""
         country = self._resolve_address_country(command.country_code)
+        self._bind(command.actor, country.country_id, CUSTOMER_ADDRESS_ACTION)
         phone = self._validate(command, country)
         kinds = _eligible_kinds(command)
         rows = self._lock_scope(command.actor.user_id, country.country_id, kinds)
@@ -227,12 +237,14 @@ class AddressService:
     ) -> AddressView:
         """Return one active exactly scoped address or hidden not found."""
         country = self._resolve_address_country(country_code)
+        self._bind(actor, country.country_id, CUSTOMER_ADDRESS_ACTION)
         row = self._get(actor.user_id, country.country_id, address_id)
         return _address_view(row)
 
     def update_address(self, command: UpdateAddress) -> AddressView:
         """Replace one address with optimistic concurrency and safe defaults."""
         country = self._resolve_address_country(command.country_code)
+        self._bind(command.actor, country.country_id, CUSTOMER_ADDRESS_ACTION)
         rows = self._lock_scope(
             command.actor.user_id,
             country.country_id,
@@ -264,6 +276,7 @@ class AddressService:
     ) -> None:
         """Soft-delete one address and promote eligible defaults."""
         country = self._resolve_address_country(country_code)
+        self._bind(actor, country.country_id, ADDRESS_SOFT_DELETE_ACTION)
         rows = self._lock_scope(
             actor.user_id,
             country.country_id,
@@ -298,6 +311,7 @@ class AddressService:
     ) -> AddressView:
         """Select one eligible scoped address as a default."""
         country = self._resolve_address_country(country_code)
+        self._bind(actor, country.country_id, CUSTOMER_ADDRESS_ACTION)
         if not isinstance(kind, DefaultKind):
             raise AddressValidationError("Default kind is invalid.")
         self.repository.lock_default_scope(actor.user_id, country.country_id, kind)
@@ -315,6 +329,25 @@ class AddressService:
         self.repository.flush()
         self._stage(actor, row, "default_changed", (_default_field(kind),))
         return _address_view(row)
+
+    def _bind(
+        self,
+        actor: AuthContext,
+        country_id: UUID,
+        action_class: str,
+    ) -> None:
+        """Set self-service database context for one address transaction."""
+        bind_database_context(
+            self.transaction.session,
+            DatabaseRequestContext(
+                authorization_mode=AuthorizationMode.SELF,
+                actor_user_id=actor.user_id,
+                effective_user_id=actor.user_id,
+                effective_country_id=country_id,
+                action_class=action_class,
+                correlation_id=actor.correlation_id,
+            ),
+        )
 
     def _resolve_address_country(self, country_code: str) -> CountryReference:
         country = _resolve_country(
@@ -519,6 +552,7 @@ class ConsentService:
     def record(self, command: RecordConsent) -> ConsentView:
         """Append one server-timed consent record."""
         country = self._validate(command)
+        self._bind(command.actor, country.country_id)
         now = self.clock()
         row = ConsentRecord(
             consent_id=uuid4(),
@@ -545,8 +579,23 @@ class ConsentService:
     ) -> list[ConsentView]:
         """Return deterministic current consent state for one country."""
         country = _resolve_country(self.countries, country_code, ConsentValidationError)
+        self._bind(actor, country.country_id)
         rows = self.repository.list_current_consents(actor.user_id, country.country_id)
         return [_consent_view(row) for row in rows]
+
+    def _bind(self, actor: AuthContext, country_id: UUID) -> None:
+        """Set self-service database context for one consent transaction."""
+        bind_database_context(
+            self.transaction.session,
+            DatabaseRequestContext(
+                authorization_mode=AuthorizationMode.SELF,
+                actor_user_id=actor.user_id,
+                effective_user_id=actor.user_id,
+                effective_country_id=country_id,
+                action_class=CUSTOMER_CONSENT_ACTION,
+                correlation_id=actor.correlation_id,
+            ),
+        )
 
     def list_history(
         self,
@@ -560,6 +609,7 @@ class ConsentService:
         if not 1 <= limit <= 100:
             raise ConsentValidationError("Consent history limit is invalid.")
         country = _resolve_country(self.countries, country_code, ConsentValidationError)
+        self._bind(actor, country.country_id)
         rows = self.repository.list_consent_history(
             actor.user_id,
             country.country_id,

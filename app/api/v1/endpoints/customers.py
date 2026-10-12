@@ -3,7 +3,16 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.core.auth_context import AuthContext
@@ -15,25 +24,44 @@ from app.modules.customers.identifier_change import (
     IdentifierChangeError,
     RequestIdentifierChange,
 )
+from app.modules.customers.exports import (
+    CustomerExportError,
+    CustomerExportNotFoundError,
+)
+from app.modules.customers.privacy import CustomerPrivacyError
 from app.modules.customers.profile import ProfileUnavailableError
 from app.modules.customers.schemas import (
     AddressResponse,
     AddressCreateRequest,
     AddressUpdateRequest,
     ConfirmIdentifierChangeRequest,
+    ClosureConfirmRequest,
+    ClosurePreviewResponse,
+    ClosureRequest,
     ConsentListResponse,
     ConsentRecordResponse,
     CurrentSessionResponse,
+    DataExportCreatedResponse,
+    DataExportRequestBody,
+    DataExportStatusResponse,
+    DataExportVerificationRequest,
+    DownloadGrantResponse,
+    DownloadReferenceResponse,
+    DownloadRequest,
     IdentifierChangeChallengeResponse,
     PreferenceResponse,
     PreferenceUpdateRequest,
     ProfileResponse,
     RecordConsentRequest,
+    RetentionNoticeResponse,
     SetDefaultAddressRequest,
     UpdateMeRequest,
     decode_consent_cursor,
     encode_consent_cursor,
 )
+from app.modules.identity.grants import AuthGrantError
+from app.modules.identity.privacy import AccountClosureError
+from app.modules.identity.schemas import ChallengeAcceptedResponse
 from app.modules.customers.service import (
     AddressConflictError,
     AddressNotFoundError,
@@ -69,6 +97,199 @@ def get_customer_application(
             detail="Customer services are unavailable.",
         )
     return factory(db)
+
+
+@router.post("/closure", response_model=ClosurePreviewResponse)
+def request_closure(
+    payload: ClosureRequest,
+    response: Response,
+    context: Annotated[AuthContext, Depends(require_authenticated)],
+    db: Annotated[Session, Depends(get_db)],
+    application: Annotated[CustomerApplication, Depends(get_customer_application)],
+) -> ClosurePreviewResponse:
+    """Create a closure preview and one confirmation grant."""
+    try:
+        preview = application.closure.request(
+            context,
+            payload.password,
+            payload.step_up_grant,
+        )
+        db.commit()
+        _apply_correlation(response, context)
+        return ClosurePreviewResponse(
+            close_grant=preview.close_grant,
+            effects=list(preview.effects),
+            retention_notices=[
+                RetentionNoticeResponse(
+                    country_id=notice.country_id,
+                    notice=notice.notice,
+                )
+                for notice in preview.retention_notices
+            ],
+        )
+    except Exception as exc:
+        db.rollback()
+        _raise_privacy_error(exc, context)
+
+
+@router.post("/closure/confirm", status_code=status.HTTP_204_NO_CONTENT)
+def confirm_closure(
+    payload: ClosureConfirmRequest,
+    response: Response,
+    context: Annotated[AuthContext, Depends(require_authenticated)],
+    db: Annotated[Session, Depends(get_db)],
+    application: Annotated[CustomerApplication, Depends(get_customer_application)],
+) -> None:
+    """Confirm and atomically apply account closure."""
+    try:
+        application.closure.confirm(context, payload.close_grant)
+        db.commit()
+        _apply_correlation(response, context)
+    except Exception as exc:
+        db.rollback()
+        _raise_privacy_error(exc, context)
+
+
+@router.post(
+    "/data-export/verification",
+    response_model=ChallengeAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def request_export_verification(
+    payload: DataExportVerificationRequest,
+    response: Response,
+    context: Annotated[AuthContext, Depends(require_authenticated)],
+    db: Annotated[Session, Depends(get_db)],
+    application: Annotated[CustomerApplication, Depends(get_customer_application)],
+) -> ChallengeAcceptedResponse:
+    """Verify the current password and send an export OTP."""
+    try:
+        challenge_id = application.exports.request_verification(
+            context,
+            payload.password,
+            payload.locale_code,
+        )
+        db.commit()
+        _apply_correlation(response, context)
+        return ChallengeAcceptedResponse(challenge_id=challenge_id)
+    except Exception as exc:
+        db.rollback()
+        _raise_export_error(exc, context)
+
+
+@router.post(
+    "/data-export",
+    response_model=DataExportCreatedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def create_export(
+    payload: DataExportRequestBody,
+    response: Response,
+    context: Annotated[AuthContext, Depends(require_authenticated)],
+    db: Annotated[Session, Depends(get_db)],
+    application: Annotated[CustomerApplication, Depends(get_customer_application)],
+    idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    ],
+) -> DataExportCreatedResponse:
+    """Create one idempotent country-scoped export request."""
+    try:
+        request = application.exports.request_export(
+            context,
+            payload.country_code,
+            idempotency_key,
+            payload.grant,
+        )
+        db.commit()
+        _apply_correlation(response, context)
+        return DataExportCreatedResponse(
+            export_request_id=request.export_request_id,
+            status=request.status,
+        )
+    except Exception as exc:
+        db.rollback()
+        _raise_export_error(exc, context)
+
+
+@router.get(
+    "/data-exports/{export_request_id}",
+    response_model=DataExportStatusResponse,
+)
+def get_export_status(
+    export_request_id: UUID,
+    context: Annotated[AuthContext, Depends(require_authenticated)],
+    application: Annotated[CustomerApplication, Depends(get_customer_application)],
+) -> DataExportStatusResponse:
+    """Return owner-scoped export status without artifact details."""
+    try:
+        view = application.exports.get_status(context, export_request_id)
+        return DataExportStatusResponse(
+            export_request_id=view.export_request_id,
+            status=view.status,
+            requested_at=view.requested_at,
+            completed_at=view.completed_at,
+            downloaded_at=view.downloaded_at,
+        )
+    except CustomerExportNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Export request is unavailable.",
+        ) from exc
+    except CustomerExportError as exc:
+        raise _read_error(exc) from exc
+
+
+@router.post(
+    "/data-exports/{export_request_id}/download-grant",
+    response_model=DownloadGrantResponse,
+)
+def create_export_download_grant(
+    export_request_id: UUID,
+    response: Response,
+    context: Annotated[AuthContext, Depends(require_authenticated)],
+    db: Annotated[Session, Depends(get_db)],
+    application: Annotated[CustomerApplication, Depends(get_customer_application)],
+) -> DownloadGrantResponse:
+    """Create one short-lived request-bound download grant."""
+    try:
+        grant = application.exports.create_download_grant(
+            context,
+            export_request_id,
+        )
+        db.commit()
+        _apply_correlation(response, context)
+        return DownloadGrantResponse(grant=grant)
+    except Exception as exc:
+        db.rollback()
+        _raise_export_error(exc, context)
+
+
+@router.post(
+    "/data-exports/{export_request_id}/download",
+    response_model=DownloadReferenceResponse,
+)
+def download_export(
+    export_request_id: UUID,
+    payload: DownloadRequest,
+    response: Response,
+    context: Annotated[AuthContext, Depends(require_authenticated)],
+    db: Annotated[Session, Depends(get_db)],
+    application: Annotated[CustomerApplication, Depends(get_customer_application)],
+) -> DownloadReferenceResponse:
+    """Consume a download grant and return one opaque reference."""
+    try:
+        reference = application.exports.download(
+            context,
+            export_request_id,
+            payload.grant,
+        )
+        db.commit()
+        _apply_correlation(response, context)
+        return DownloadReferenceResponse(download_reference=reference)
+    except Exception as exc:
+        db.rollback()
+        _raise_export_error(exc, context)
 
 
 @router.get("", response_model=ProfileResponse)
@@ -560,6 +781,40 @@ def _raise_identifier_change_error(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Request could not be completed.",
+            headers=headers,
+        ) from error
+    raise error
+
+
+def _raise_privacy_error(error: Exception, context: AuthContext) -> None:
+    headers = _correlation_headers(context)
+    if isinstance(error, CustomerPrivacyError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Account closure cannot be completed.",
+            headers=headers,
+        ) from error
+    if isinstance(error, (AccountClosureError, AuthGrantError)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account closure cannot be completed.",
+            headers=headers,
+        ) from error
+    raise error
+
+
+def _raise_export_error(error: Exception, context: AuthContext) -> None:
+    headers = _correlation_headers(context)
+    if isinstance(error, CustomerExportNotFoundError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Export request is unavailable.",
+            headers=headers,
+        ) from error
+    if isinstance(error, (CustomerExportError, AuthGrantError, KeyError)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Data export request cannot be completed.",
             headers=headers,
         ) from error
     raise error

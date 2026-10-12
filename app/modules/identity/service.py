@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
 
@@ -14,6 +14,7 @@ from app.core.identifiers import (
     normalize_phone_e164,
 )
 from app.core.security import DigestService
+from app.modules.identity.events import SecurityEventRecorder
 from app.modules.identity.grants import AuthGrantService
 from app.modules.identity.models import AuthIdentity, UserAccount
 from app.modules.identity.notifications import (
@@ -342,6 +343,7 @@ class AuthenticationService:
         countries: CountryReader | None = None,
         digests: DigestService | None = None,
         rate_limiter: RateLimiter | None = None,
+        events: SecurityEventRecorder | None = None,
     ) -> None:
         """Initialize authentication dependencies."""
         self.account_repository = account_repository
@@ -352,6 +354,7 @@ class AuthenticationService:
         self.countries = countries
         self.digests = digests
         self.rate_limiter = rate_limiter
+        self.events = events
 
     def login(
         self,
@@ -388,6 +391,7 @@ class AuthenticationService:
             or not verification.valid
             or account.status != AccountStatus.ACTIVE
         ):
+            self._emit_login("iam.login.failed")
             raise AccountValidationError(
                 "AUTH_INVALID_CREDENTIALS",
                 "Authentication credentials are invalid.",
@@ -397,6 +401,7 @@ class AuthenticationService:
         now = self.clock()
         account.last_login_at = now
         self.account_repository.flush()
+        self._emit_login("iam.login.succeeded")
         return self.sessions.create(
             account=account,
             authentication_methods=("password",),
@@ -422,6 +427,17 @@ class AuthenticationService:
         self.rate_limiter.check(f"login:identifier:{identifier_hash}", policy)
         if ip_hash is not None:
             self.rate_limiter.check(f"login:ip:{ip_hash}", policy)
+
+    def _emit_login(self, action: str) -> None:
+        """Emit a login outcome without the submitted identifier."""
+        if self.events is None:
+            return
+        outcome = action.rsplit(".", 1)[-1].upper()
+        self.events.record_signal(
+            action,
+            uuid4(),
+            attributes={"channel": "PASSWORD", "reason_code": outcome},
+        )
 
     def _find_account(self, identifier: str) -> UserAccount | None:
         try:
@@ -450,6 +466,7 @@ class PasswordRecoveryService:
         notifications: NotificationSender,
         reset_ttl: timedelta,
         countries: CountryReader | None = None,
+        events: SecurityEventRecorder | None = None,
     ) -> None:
         """Initialize password recovery dependencies."""
         self.account_repository = account_repository
@@ -460,6 +477,7 @@ class PasswordRecoveryService:
         self.notifications = notifications
         self.reset_ttl = reset_ttl
         self.countries = countries
+        self.events = events
 
     def request(
         self,
@@ -547,6 +565,14 @@ class PasswordRecoveryService:
         account.password_hash = self.passwords.hash_password(new_password)
         self.sessions.revoke_all(account.user_id)
         self.account_repository.flush()
+        if self.events is not None:
+            self.events.record(
+                action="iam.password.changed",
+                resource_type="user_account",
+                resource_id=account.user_id,
+                actor_user_id=account.user_id,
+                after_data={"reason_code": "PASSWORD_RESET"},
+            )
         if account.email is not None:
             self.notifications.send_security(
                 SecurityNotification(

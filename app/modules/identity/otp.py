@@ -10,7 +10,7 @@ from app.core.security import DigestService
 from app.modules.identity.events import SecurityEventRecorder
 from app.modules.identity.models import OtpChallenge
 from app.modules.identity.notifications import NotificationSender, OtpNotification
-from app.modules.identity.rate_limits import RateLimitPolicy, RateLimiter
+from app.modules.identity.rate_limits import RateLimitExceeded, RateLimitPolicy, RateLimiter
 from app.modules.identity.types import OtpChannel, OtpPurpose
 
 
@@ -92,7 +92,7 @@ class OtpService:
         code = self.code_source()
         destination_hash = self.digests.digest("otp-destination", destination)
         if self.rate_limiter is not None:
-            self.rate_limiter.check(
+            self._check_rate_limit(
                 f"otp:request:destination:{destination_hash}",
                 RateLimitPolicy(limit=5, window=timedelta(minutes=15)),
             )
@@ -165,7 +165,7 @@ class OtpService:
         challenge = self.repository.get_for_update(otp_id)
         now = self.clock()
         if self.rate_limiter is not None:
-            self.rate_limiter.check(
+            self._check_rate_limit(
                 f"otp:verify:challenge:{otp_id}",
                 RateLimitPolicy(limit=self.max_attempts, window=self.ttl),
             )
@@ -203,6 +203,21 @@ class OtpService:
             )
         self.repository.flush()
         return challenge
+
+    def _check_rate_limit(self, key: str, policy: RateLimitPolicy) -> None:
+        """Apply one OTP limit and emit a redacted denial when it trips."""
+        if self.rate_limiter is None:
+            return
+        try:
+            self.rate_limiter.check(key, policy)
+        except RateLimitExceeded:
+            if self.events is not None:
+                self.events.record_signal(
+                    "iam.otp.rate_limited",
+                    uuid4(),
+                    attributes={"channel": "OTP", "reason_code": "RATE_LIMITED"},
+                )
+            raise
 
 
 def _generate_code() -> str:

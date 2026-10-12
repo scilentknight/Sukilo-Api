@@ -27,6 +27,11 @@ from app.modules.identity.service import (
     PasswordRecoveryService,
     RegistrationService,
 )
+from app.modules.identity.security_events import (
+    InMemorySecurityMetrics,
+    LoggingSecurityEventSink,
+    SecurityObservability,
+)
 from app.modules.identity.sessions import SessionService
 from app.modules.identity.tokens import TokenError, TokenService
 from app.modules.identity.types import (
@@ -58,6 +63,8 @@ class IdentityApplication:
     clock: Callable[[], datetime]
     step_up_ttl: timedelta = timedelta(minutes=5)
     identifier_change_ttl: timedelta = timedelta(minutes=5)
+    data_export_ttl: timedelta = timedelta(minutes=15)
+    events: SecurityEventRecorder | None = None
 
     def authenticate(
         self,
@@ -177,6 +184,38 @@ class IdentityApplication:
             ttl=self.identifier_change_ttl,
         )
 
+    def verify_data_export(
+        self,
+        *,
+        context: AuthContext,
+        otp_id: UUID,
+        code: str,
+    ) -> str:
+        """Exchange an owned export OTP for a session-bound grant."""
+        challenge = self.otp.verify(
+            otp_id,
+            OtpPurpose.DATA_EXPORT,
+            code,
+            expected_user_id=context.user_id,
+        )
+        account = self.accounts.get_by_id(context.user_id)
+        if (
+            challenge.channel != OtpChannel.EMAIL
+            or account is None
+            or account.status != AccountStatus.ACTIVE
+        ):
+            raise OtpError("OTP challenge is unavailable.")
+        return self.grants.create(
+            user_id=context.user_id,
+            session_id=context.session_id,
+            purpose=GrantPurpose.DATA_EXPORT,
+            action_class="DATA_EXPORT",
+            subject_hash=None,
+            authentication_methods=[*context.authentication_methods, "otp"],
+            correlation_id=context.correlation_id,
+            ttl=self.data_export_ttl,
+        )
+
 
 class IdentityApplicationBuilder:
     """Build request-scoped identity services with shared secure adapters."""
@@ -215,13 +254,21 @@ class IdentityApplicationBuilder:
         self.dummy_password_hash = self.passwords.hash_password(
             "dummy-password-never-used"
         )
+        self.security_metrics = InMemorySecurityMetrics()
+        self.security_sink = LoggingSecurityEventSink()
 
     def __call__(self, db: Session) -> IdentityApplication:
         """Build identity services sharing one SQLAlchemy transaction."""
         accounts = AccountRepository(db)
+        observability = SecurityObservability(
+            sink=self.security_sink,
+            metrics=self.security_metrics,
+            clock=self.clock,
+        )
         events = SecurityEventRecorder(
             self.audit_writer,
             DatabaseTransaction(db),
+            observability,
         )
         otp = OtpService(
             repository=OtpRepository(db),
@@ -266,6 +313,7 @@ class IdentityApplicationBuilder:
             countries=self.countries,
             digests=self.digests,
             rate_limiter=self.rate_limiter,
+            events=events,
         )
         recovery = PasswordRecoveryService(
             account_repository=accounts,
@@ -276,6 +324,7 @@ class IdentityApplicationBuilder:
             notifications=self.notifications,
             reset_ttl=self.reset_ttl,
             countries=self.countries,
+            events=events,
         )
         return IdentityApplication(
             registration=registration,
@@ -290,4 +339,5 @@ class IdentityApplicationBuilder:
             digests=self.digests,
             notifications=self.notifications,
             clock=self.clock,
+            events=events,
         )

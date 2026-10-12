@@ -8,7 +8,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from app.modules.customers.types import AddressType, ConsentType, DefaultKind
+from app.modules.customers.types import (
+    AddressType,
+    ConsentType,
+    DataExportStatus,
+    DefaultKind,
+)
 from app.modules.identity.types import AccountStatus
 
 
@@ -190,6 +195,88 @@ class IdentifierChangeChallengeResponse(BaseModel):
     """Return an opaque candidate verification challenge."""
 
     challenge_id: UUID
+
+
+class ClosureRequest(BaseModel):
+    """Authorize an account-closure preview."""
+
+    model_config = ConfigDict(extra="forbid")
+    password: str = Field(min_length=1, max_length=128)
+    step_up_grant: str = Field(min_length=32, max_length=512)
+
+
+class ClosureConfirmRequest(BaseModel):
+    """Confirm account closure with a one-time grant."""
+
+    model_config = ConfigDict(extra="forbid")
+    close_grant: str = Field(min_length=32, max_length=512)
+
+
+class RetentionNoticeResponse(BaseModel):
+    """Expose one country-specific retention notice."""
+
+    country_id: UUID
+    notice: str
+
+
+class ClosurePreviewResponse(BaseModel):
+    """Return closure effects and the confirmation grant."""
+
+    close_grant: str
+    effects: list[str]
+    retention_notices: list[RetentionNoticeResponse]
+
+
+class DataExportVerificationRequest(BaseModel):
+    """Request authenticated export verification."""
+
+    model_config = ConfigDict(extra="forbid")
+    password: str = Field(min_length=1, max_length=128)
+    locale_code: str = Field(min_length=2, max_length=32)
+
+
+class DataExportRequestBody(BaseModel):
+    """Create one country-scoped export request."""
+
+    model_config = ConfigDict(extra="forbid")
+    country_code: str = Field(min_length=2, max_length=2)
+    grant: str = Field(min_length=32, max_length=512)
+
+
+class DataExportCreatedResponse(BaseModel):
+    """Return the stable export request identifier."""
+
+    export_request_id: UUID
+    status: DataExportStatus
+
+
+class DataExportStatusResponse(BaseModel):
+    """Expose export status without artifact details."""
+
+    export_request_id: UUID
+    status: DataExportStatus
+    requested_at: datetime
+    completed_at: datetime | None
+    downloaded_at: datetime | None
+
+
+class DownloadGrantResponse(BaseModel):
+    """Return one request-bound download grant."""
+
+    grant: str
+
+
+class DownloadRequest(BaseModel):
+    """Consume one request-bound download grant."""
+
+    model_config = ConfigDict(extra="forbid")
+    grant: str = Field(min_length=32, max_length=512)
+
+
+class DownloadReferenceResponse(BaseModel):
+    """Return one opaque, one-time download reference."""
+
+    download_reference: str
 
 
 def encode_consent_cursor(recorded_at: datetime, consent_id: UUID) -> str:

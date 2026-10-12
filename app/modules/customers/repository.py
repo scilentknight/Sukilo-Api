@@ -8,8 +8,13 @@ from sqlalchemy import select, text, tuple_
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
-from app.modules.customers.models import Address, ConsentRecord, UserPreference
-from app.modules.customers.types import DefaultKind
+from app.modules.customers.models import (
+    Address,
+    ConsentRecord,
+    DataExportRequest,
+    UserPreference,
+)
+from app.modules.customers.types import DataExportStatus, DefaultKind
 
 
 class CustomerRepository:
@@ -122,6 +127,89 @@ class CustomerRepository:
             .with_for_update()
         )
         return list(self.db.scalars(statement))
+
+    def lock_all_addresses_by_user(self, user_id: UUID) -> list[Address]:
+        """Lock active and deleted addresses owned by one account."""
+        statement = (
+            select(Address)
+            .where(Address.user_id == user_id)
+            .order_by(Address.address_id)
+            .with_for_update()
+        )
+        return list(self.db.scalars(statement))
+
+    def list_country_ids_by_user(self, user_id: UUID) -> list[UUID]:
+        """Return distinct countries associated with customer-owned rows."""
+        address_ids = select(Address.country_id).where(Address.user_id == user_id)
+        consent_ids = select(ConsentRecord.country_id).where(
+            ConsentRecord.user_id == user_id
+        )
+        preference_ids = select(UserPreference.country_id).where(
+            UserPreference.user_id == user_id,
+            UserPreference.country_id.is_not(None),
+        )
+        statement = address_ids.union(consent_ids, preference_ids)
+        return list(self.db.scalars(statement))
+
+    def get_export_by_key(
+        self,
+        user_id: UUID,
+        country_id: UUID,
+        idempotency_key: str,
+    ) -> DataExportRequest | None:
+        """Return one idempotent export request."""
+        return self.db.scalar(
+            select(DataExportRequest).where(
+                DataExportRequest.user_id == user_id,
+                DataExportRequest.country_id == country_id,
+                DataExportRequest.idempotency_key == idempotency_key,
+            )
+        )
+
+    def add_export(self, request: DataExportRequest) -> None:
+        """Stage one data export request."""
+        self.db.add(request)
+
+    def get_owned_export(
+        self,
+        user_id: UUID,
+        export_request_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> DataExportRequest | None:
+        """Return one owner-scoped export request."""
+        statement = select(DataExportRequest).where(
+            DataExportRequest.user_id == user_id,
+            DataExportRequest.export_request_id == export_request_id,
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return self.db.scalar(statement)
+
+    def get_export_for_update(
+        self,
+        export_request_id: UUID,
+    ) -> DataExportRequest | None:
+        """Lock one export request for a trusted job."""
+        return self.db.scalar(
+            select(DataExportRequest)
+            .where(DataExportRequest.export_request_id == export_request_id)
+            .with_for_update()
+        )
+
+    def claim_pending_export(self) -> DataExportRequest | None:
+        """Lock the oldest pending export without blocking another worker."""
+        statement = (
+            select(DataExportRequest)
+            .where(DataExportRequest.status == DataExportStatus.PENDING)
+            .order_by(
+                DataExportRequest.requested_at,
+                DataExportRequest.export_request_id,
+            )
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        )
+        return self.db.scalar(statement)
 
     def list_current_consents(
         self,

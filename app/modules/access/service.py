@@ -7,6 +7,12 @@ from uuid import UUID
 from uuid import uuid4
 
 from app.core.auth_context import AuthContext
+from app.core.database_context import (
+    GLOBAL_ASSIGNMENT_READ_ACTION,
+    AuthorizationMode,
+    DatabaseRequestContext,
+    bind_database_context,
+)
 from app.core.transactions import DatabaseTransaction
 from app.modules.access.models import Permission, Role, UserRoleAssignment
 from app.modules.access.policies import (
@@ -21,6 +27,7 @@ from app.modules.access.ports import (
     Clock,
 )
 from app.modules.access.types import RoleStatus, ScopeType
+from app.modules.identity.events import SecurityEventRecorder
 from app.modules.identity.grants import AuthGrantService
 from app.modules.identity.types import AccountStatus, GrantPurpose
 from app.ports.audit import AuditEventInput, AuditWriter
@@ -76,6 +83,7 @@ class RevokeAssignment:
     assignment_id: UUID
     reason: str
     step_up_token: str
+    country_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +127,7 @@ class AssignmentService:
         transaction: DatabaseTransaction,
         cache: AuthorizationCachePort,
         clock: Clock,
+        events: SecurityEventRecorder | None = None,
     ) -> None:
         """Initialize assignment dependencies."""
         self.repository = repository
@@ -130,6 +139,7 @@ class AssignmentService:
         self.transaction = transaction
         self.cache = cache
         self.clock = clock
+        self.events = events
         self.pending_invalidations: list[tuple[UUID, int]] = []
 
     def list_roles(
@@ -157,6 +167,7 @@ class AssignmentService:
         """List only explicitly filtered assignments in actor scope."""
         if query.user_id is None and query.country_id is None:
             raise AssignmentValidationError("An assignment filter is required.")
+        self._bind_self(query.actor)
         projections = self.repository.list_active_projections(
             query.actor.user_id,
             self.clock(),
@@ -176,6 +187,7 @@ class AssignmentService:
             scope,
             projections,
         )
+        self._bind_operator(query.actor, query.country_id, "IAM_ASSIGNMENT_READ")
         rows = self.repository.list_assignments(
             user_id=query.user_id,
             country_id=query.country_id,
@@ -187,6 +199,7 @@ class AssignmentService:
     def grant_assignment(self, command: GrantAssignment) -> AssignmentView:
         """Grant one scoped role assignment."""
         now = self.clock()
+        self._bind_self(command.actor)
         _validate_grant_command(command, now)
         role = self.repository.get_role_by_code_for_update(command.role_code)
         _validate_role(role, command.scope)
@@ -226,6 +239,11 @@ class AssignmentService:
         ):
             raise AssignmentConflictError("Assignment validity overlaps.")
         self._consume_step_up(command, "iam.assignment.grant")
+        self._bind_operator(
+            command.actor,
+            command.scope.country_id,
+            "IAM_ASSIGNMENT_GRANT",
+        )
         assignment = _new_assignment(command, role, now)
         previous_version = target.auth_version
         target.auth_version += 1
@@ -243,6 +261,14 @@ class AssignmentService:
         if not reason:
             raise AssignmentValidationError("Revocation reason is required.")
         now = self.clock()
+        if command.country_id is None:
+            self._bind_self(command.actor)
+        else:
+            self._bind_operator(
+                command.actor,
+                command.country_id,
+                "IAM_ASSIGNMENT_REVOKE",
+            )
         assignment = self.repository.get_assignment_for_update(
             command.assignment_id,
         )
@@ -295,6 +321,45 @@ class AssignmentService:
     def discard_invalidations(self) -> None:
         """Discard staged invalidations after database rollback."""
         self.pending_invalidations.clear()
+
+    def _bind_self(self, actor: AuthContext) -> None:
+        """Let the actor read only their own assignment rows."""
+        bind_database_context(
+            self.transaction.session,
+            DatabaseRequestContext(
+                authorization_mode=AuthorizationMode.SELF,
+                actor_user_id=actor.user_id,
+                effective_user_id=actor.user_id,
+                action_class="ASSIGNMENT_SELF",
+                correlation_id=actor.correlation_id,
+            ),
+        )
+
+    def _bind_operator(
+        self,
+        actor: AuthContext,
+        country_id: UUID | None,
+        action_class: str,
+    ) -> None:
+        """Set operator context from the already-authorized country scope."""
+        if country_id is None:
+            context = DatabaseRequestContext(
+                authorization_mode=AuthorizationMode.GLOBAL_OPERATOR,
+                actor_user_id=actor.user_id,
+                effective_user_id=actor.user_id,
+                action_class=GLOBAL_ASSIGNMENT_READ_ACTION,
+                correlation_id=actor.correlation_id,
+            )
+        else:
+            context = DatabaseRequestContext(
+                authorization_mode=AuthorizationMode.COUNTRY_OPERATOR,
+                actor_user_id=actor.user_id,
+                effective_user_id=actor.user_id,
+                effective_country_id=country_id,
+                action_class=action_class,
+                correlation_id=actor.correlation_id,
+            )
+        bind_database_context(self.transaction.session, context)
 
     def stage_failure_audit(
         self,
@@ -385,6 +450,7 @@ class AssignmentService:
         request = AuthorizationRequest(actor, permission, scope, None)
         decision = self.policy_evaluator.evaluate(request, projections)
         if not decision.allowed:
+            self._emit("iam.authorization.denied", actor, scope.country_id)
             raise AssignmentDeniedError("Assignment permission is denied.")
 
     def _require_delegable(
@@ -441,6 +507,7 @@ class AssignmentService:
             after_data=_audit_data(role.code, command.scope),
         )
         self.audit_writer.stage(event, self.transaction)
+        self._emit("iam.assignment.granted", command.actor, command.scope.country_id)
 
     def _stage_revoked(
         self,
@@ -461,6 +528,29 @@ class AssignmentService:
             after_data={"revoked": True, "reason": command.reason.strip()},
         )
         self.audit_writer.stage(event, self.transaction)
+        self._emit("iam.assignment.revoked", command.actor, scope.country_id)
+
+    def _emit(
+        self,
+        action: str,
+        actor: AuthContext,
+        country_id: UUID | None,
+    ) -> None:
+        """Forward one assignment outcome without the revocation reason text."""
+        if self.events is None:
+            return
+        if action.endswith("granted"):
+            reason = "GRANTED"
+        elif action.endswith("denied"):
+            reason = "DENIED"
+        else:
+            reason = "REVOKED"
+        self.events.record_signal(
+            action,
+            actor.correlation_id,
+            country_id=country_id,
+            attributes={"reason_code": reason},
+        )
 
 
 def _validate_grant_command(

@@ -20,9 +20,15 @@ from app.modules.access.policies import (
 from app.modules.access.repository import AssignmentRepository
 from app.modules.access.service import AssignmentService
 from app.modules.identity.grants import AuthGrantService
+from app.modules.identity.events import SecurityEventRecorder
 from app.modules.identity.repository import (
     AccountRepository,
     AuthGrantRepository,
+)
+from app.modules.identity.security_events import (
+    InMemorySecurityMetrics,
+    LoggingSecurityEventSink,
+    SecurityObservability,
 )
 from app.ports.audit import AuditWriter, NoOpAuditWriter
 from app.ports.country import CountryReader
@@ -109,6 +115,8 @@ class AccessApplicationBuilder:
         self.audit_writer = audit_writer
         self.cache_backend = cache_backend
         self.clock = clock
+        self.security_metrics = InMemorySecurityMetrics()
+        self.security_sink = LoggingSecurityEventSink()
 
     def __call__(self, db: Session) -> AccessApplication:
         """Build services sharing the supplied database transaction."""
@@ -123,6 +131,15 @@ class AccessApplicationBuilder:
             digests=self.digests,
             clock=self.clock,
         )
+        events = SecurityEventRecorder(
+            self.audit_writer,
+            DatabaseTransaction(db),
+            SecurityObservability(
+                sink=self.security_sink,
+                metrics=self.security_metrics,
+                clock=self.clock,
+            ),
+        )
         assignments = AssignmentService(
             repository=repository,
             accounts=AccountRepository(db),
@@ -133,6 +150,7 @@ class AccessApplicationBuilder:
             transaction=DatabaseTransaction(db),
             cache=cache,
             clock=self.clock,
+            events=events,
         )
         authorizations = AuthorizationProjectionService(
             repository=repository,
