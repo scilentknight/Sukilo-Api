@@ -21,7 +21,7 @@ class Permission(Base):
             name="ck_permission_status",
         ),
         CheckConstraint(
-            "code ~ '^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$'",
+            "code ~ '^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,2}$'",
             name="ck_permission_code_format",
         ),
         Index("uq_permission_code", "code", unique=True),

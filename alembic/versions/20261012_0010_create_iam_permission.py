@@ -36,7 +36,7 @@ def upgrade() -> None:
             name="ck_permission_status",
         ),
         sa.CheckConstraint(
-            "code ~ '^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$'",
+            "code ~ '^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){1,2}$'",
             name="ck_permission_code_format",
         ),
         sa.PrimaryKeyConstraint("permission_id"),

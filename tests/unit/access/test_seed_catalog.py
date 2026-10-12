@@ -1,6 +1,10 @@
 """Test deterministic Phase 3 role and permission catalog definitions."""
 
+import re
+
 from app.modules.access.catalog import PERMISSIONS, ROLES, role_permission_codes
+
+_PERMISSION_CODE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){1,2}$")
 from app.modules.access.types import ScopeType
 
 
@@ -26,6 +30,11 @@ EXPECTED_PERMISSIONS = {
     "refund.approve",
     "finance.payout.release",
 }
+
+
+def test_permission_codes_match_the_database_format() -> None:
+    """Accept both domain.action and domain.resource.action codes."""
+    assert all(_PERMISSION_CODE.fullmatch(entry.code) for entry in PERMISSIONS)
 
 
 def test_permission_catalog_has_stable_unique_ids() -> None:
