@@ -115,7 +115,12 @@ class DevelopmentCountryReader:
             Whether the operation is enabled.
         """
         del country_id
-        return operation in {"REGISTER", "LOGIN", "RESET"}
+        return operation in {
+            "REGISTER",
+            "LOGIN",
+            "RESET",
+            "iam.assignment.manage",
+        }
 
     def is_locale_enabled(self, country_id: UUID, locale_code: str) -> bool:
         """Allow any locale during development.
@@ -218,6 +223,8 @@ def build_identity_application_factory(
         ValueError: If production authentication dependencies are incomplete.
     """
     production = settings.APP_ENV.casefold() == "production"
+    if production and countries is None:
+        raise ValueError("A durable country adapter is required in production.")
     resolver = secrets or EnvSecretResolver()
     digests = _build_digest_service(settings, resolver, production=production)
     tokens = _build_token_service(settings, resolver, production=production)

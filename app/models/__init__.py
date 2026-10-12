@@ -1,5 +1,11 @@
 """SQLAlchemy models for Alembic autogenerate and application imports."""
 
+from app.modules.access.models import (
+    Permission,
+    Role,
+    RolePermission,
+    UserRoleAssignment,
+)
 from app.modules.identity.models import (
     AuthGrant,
     AuthIdentity,
@@ -13,8 +19,12 @@ __all__ = [
     "AuthGrant",
     "AuthIdentity",
     "OtpChallenge",
+    "Permission",
     "Product",
     "ProductImage",
+    "Role",
+    "RolePermission",
     "UserAccount",
+    "UserRoleAssignment",
     "UserSession",
 ]
