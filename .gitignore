@@ -13,6 +13,9 @@ env/
 .env.*
 !.env.example
 
+# Local JWT / auth material
+secrets/
+
 # Logs
 *.log
 logs/

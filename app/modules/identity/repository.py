@@ -1,11 +1,19 @@
-"""Persist identity accounts with parameterized SQLAlchemy statements."""
+"""Persist identity and authentication state with parameterized statements."""
 
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
-from app.modules.identity.models import AuthIdentity, UserAccount
+from app.modules.identity.models import (
+    AuthGrant,
+    AuthIdentity,
+    OtpChallenge,
+    UserAccount,
+    UserSession,
+)
+from app.modules.identity.types import OtpPurpose
 
 
 class AccountRepository:
@@ -39,7 +47,12 @@ class AccountRepository:
             statement = statement.with_for_update()
         return self.db.scalar(statement)
 
-    def get_by_email(self, email: str) -> UserAccount | None:
+    def get_by_email(
+        self,
+        email: str,
+        *,
+        for_update: bool = False,
+    ) -> UserAccount | None:
         """Return an account by normalized email.
 
         Args:
@@ -49,6 +62,8 @@ class AccountRepository:
             Matching account, or `None`.
         """
         statement = select(UserAccount).where(UserAccount.email == email)
+        if for_update:
+            statement = statement.with_for_update()
         return self.db.scalar(statement)
 
     def get_by_phone(self, phone_e164: str) -> UserAccount | None:
@@ -108,3 +123,191 @@ class AccountRepository:
             return False
         statement = select(UserAccount.user_id).where(or_(*clauses)).limit(1)
         return self.db.scalar(statement) is not None
+
+
+class OtpRepository:
+    """Persist and lock OTP challenges."""
+
+    def __init__(self, db: Session) -> None:
+        """Initialize the repository."""
+        self.db = db
+
+    def invalidate_active(
+        self,
+        destination_hash: str,
+        purpose: OtpPurpose,
+        now: datetime,
+    ) -> None:
+        """Invalidate matching unconsumed challenges."""
+        statement = (
+            update(OtpChallenge)
+            .where(
+                OtpChallenge.destination_hash == destination_hash,
+                OtpChallenge.purpose == purpose,
+                OtpChallenge.verified_at.is_(None),
+                OtpChallenge.invalidated_at.is_(None),
+            )
+            .values(invalidated_at=now)
+        )
+        self.db.execute(statement)
+
+    def add(self, challenge: OtpChallenge) -> None:
+        """Stage an OTP challenge."""
+        self.db.add(challenge)
+
+    def get_for_update(self, otp_id: UUID) -> OtpChallenge | None:
+        """Lock and return an OTP challenge."""
+        statement = (
+            select(OtpChallenge)
+            .where(OtpChallenge.otp_id == otp_id)
+            .with_for_update()
+        )
+        return self.db.scalar(statement)
+
+    def flush(self) -> None:
+        """Flush OTP changes without committing."""
+        self.db.flush()
+
+
+class AuthGrantRepository:
+    """Persist and lock single-use authorization grants."""
+
+    def __init__(self, db: Session) -> None:
+        """Initialize the repository."""
+        self.db = db
+
+    def add(self, grant: AuthGrant) -> None:
+        """Stage an authorization grant."""
+        self.db.add(grant)
+
+    def get_by_token_hash_for_update(
+        self,
+        token_hash: str,
+    ) -> AuthGrant | None:
+        """Lock and return a grant by protected token digest."""
+        statement = (
+            select(AuthGrant)
+            .where(AuthGrant.token_hash == token_hash)
+            .with_for_update()
+        )
+        return self.db.scalar(statement)
+
+    def flush(self) -> None:
+        """Flush grant changes without committing."""
+        self.db.flush()
+
+
+class SessionRepository:
+    """Persist refresh generations and enforce account ownership."""
+
+    def __init__(self, db: Session) -> None:
+        """Initialize the repository."""
+        self.db = db
+
+    def add(self, session: UserSession) -> None:
+        """Stage a refresh session."""
+        self.db.add(session)
+
+    def get_by_refresh_hash_for_update(
+        self,
+        token_hash: str,
+    ) -> UserSession | None:
+        """Lock and return a session by protected refresh digest."""
+        statement = (
+            select(UserSession)
+            .where(UserSession.refresh_token_hash == token_hash)
+            .with_for_update()
+        )
+        return self.db.scalar(statement)
+
+    def list_active_by_user(
+        self,
+        user_id: UUID,
+        now: datetime,
+    ) -> list[UserSession]:
+        """Return only live sessions owned by one account."""
+        statement = (
+            select(UserSession)
+            .where(
+                UserSession.user_id == user_id,
+                UserSession.revoked_at.is_(None),
+                UserSession.expires_at > now,
+                UserSession.rotated_at.is_(None),
+            )
+            .order_by(UserSession.issued_at.desc())
+        )
+        return list(self.db.scalars(statement))
+
+    def get_owned_for_update(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+    ) -> UserSession | None:
+        """Lock a session only when it belongs to the account."""
+        statement = (
+            select(UserSession)
+            .where(
+                UserSession.user_id == user_id,
+                UserSession.session_id == session_id,
+            )
+            .with_for_update()
+        )
+        return self.db.scalar(statement)
+
+    def get_active_owned(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        now: datetime,
+    ) -> UserSession | None:
+        """Return a live unrotated session owned by one account."""
+        statement = select(UserSession).where(
+            UserSession.user_id == user_id,
+            UserSession.session_id == session_id,
+            UserSession.revoked_at.is_(None),
+            UserSession.rotated_at.is_(None),
+            UserSession.expires_at > now,
+        )
+        return self.db.scalar(statement)
+
+    def revoke_family(
+        self,
+        family_id: UUID,
+        now: datetime,
+        reason: str,
+    ) -> None:
+        """Revoke every live generation in one refresh family."""
+        statement = (
+            update(UserSession)
+            .where(
+                UserSession.family_id == family_id,
+                UserSession.revoked_at.is_(None),
+            )
+            .values(revoked_at=now, revoke_reason=reason)
+        )
+        self.db.execute(statement)
+
+    def revoke_all_by_user(
+        self,
+        user_id: UUID,
+        now: datetime,
+        reason: str,
+        except_session_id: UUID | None,
+    ) -> None:
+        """Revoke all live sessions except an optional current session."""
+        clauses = [
+            UserSession.user_id == user_id,
+            UserSession.revoked_at.is_(None),
+        ]
+        if except_session_id is not None:
+            clauses.append(UserSession.session_id != except_session_id)
+        statement = (
+            update(UserSession)
+            .where(*clauses)
+            .values(revoked_at=now, revoke_reason=reason)
+        )
+        self.db.execute(statement)
+
+    def flush(self) -> None:
+        """Flush session changes without committing."""
+        self.db.flush()
