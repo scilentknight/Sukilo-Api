@@ -42,6 +42,7 @@ def test_country_reader_resolves_registered_country_policy() -> None:
         policy_versions={"PRIVACY": "2026-09"},
     )
     assert reader.resolve_country("NP").country_id == country_id
+    assert reader.resolve_country_id(country_id).code == "NP"
     assert reader.is_operation_enabled(country_id, "REGISTER")
     assert reader.is_locale_enabled(country_id, "en-NP")
     assert reader.is_currency_enabled(country_id, "NPR")

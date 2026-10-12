@@ -84,6 +84,17 @@ class InMemoryCountryReader:
         """
         return self._by_code[code].reference
 
+    def resolve_country_id(self, country_id: UUID) -> CountryReference:
+        """Resolve a registered country identifier.
+
+        Args:
+            country_id: Stable country identifier.
+
+        Returns:
+            Registered country reference.
+        """
+        return self._by_id[country_id].reference
+
     def is_operation_enabled(self, country_id: UUID, operation: str) -> bool:
         """Return whether an operation is enabled.
 

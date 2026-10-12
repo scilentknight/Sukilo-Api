@@ -7,17 +7,24 @@ from fastapi.testclient import TestClient
 
 from app.api.v1.endpoints.auth import get_identity_application, router
 from app.core.database import get_db
+from app.modules.identity.otp import OtpCodeInvalidError
 from app.modules.identity.sessions import TokenPair
 
 
 class DatabaseFake:
     """Record transaction boundary calls."""
 
+    def __init__(self) -> None:
+        """Initialize transaction events."""
+        self.events: list[str] = []
+
     def commit(self) -> None:
         """Accept a transaction."""
+        self.events.append("commit")
 
     def rollback(self) -> None:
         """Reject a transaction."""
+        self.events.append("rollback")
 
 
 class AuthenticationFake:
@@ -53,11 +60,31 @@ class ApplicationFake:
     digests = DigestsFake()
 
 
-def _client() -> TestClient:
+class InvalidRegistrationFake:
+    """Simulate a flushed invalid OTP attempt."""
+
+    def verify_registration(self, otp_id: UUID, code: str) -> None:
+        """Reject an invalid OTP code after persistence."""
+        del otp_id, code
+        raise OtpCodeInvalidError("OTP code is invalid.")
+
+
+class InvalidOtpApplicationFake(ApplicationFake):
+    """Expose invalid registration verification."""
+
+    registration = InvalidRegistrationFake()
+
+
+def _client(
+    application: object | None = None,
+    database: DatabaseFake | None = None,
+) -> TestClient:
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
-    app.dependency_overrides[get_db] = lambda: DatabaseFake()
-    app.dependency_overrides[get_identity_application] = lambda: ApplicationFake()
+    app.dependency_overrides[get_db] = lambda: database or DatabaseFake()
+    app.dependency_overrides[get_identity_application] = (
+        lambda: application or ApplicationFake()
+    )
     return TestClient(app)
 
 
@@ -95,3 +122,18 @@ def test_refresh_requires_origin_and_double_submit_csrf() -> None:
     )
     assert accepted.status_code == 200
     assert accepted.json()["access_token"] == "access-two"
+
+
+def test_invalid_otp_attempt_is_committed() -> None:
+    """Persist a failed OTP attempt instead of rolling it back."""
+    database = DatabaseFake()
+    response = _client(InvalidOtpApplicationFake(), database).post(
+        "/api/v1/auth/otp/verify",
+        json={
+            "challenge_id": str(UUID(int=9)),
+            "purpose": "REGISTER",
+            "code": "000000",
+        },
+    )
+    assert response.status_code == 400
+    assert database.events == ["commit"]

@@ -10,8 +10,9 @@ from app.core.security import DigestService
 from app.core.transactions import DatabaseTransaction
 from app.modules.identity.events import SecurityEventRecorder
 from app.modules.identity.grants import AuthGrantService
+from app.modules.identity.identifier_change import binding_for_otp_purpose
 from app.modules.identity.notifications import NotificationSender
-from app.modules.identity.otp import OtpService
+from app.modules.identity.otp import OtpError, OtpService
 from app.modules.identity.passwords import PasswordHasher
 from app.modules.identity.rate_limits import RateLimiter
 from app.modules.identity.repository import (
@@ -56,6 +57,7 @@ class IdentityApplication:
     notifications: NotificationSender
     clock: Callable[[], datetime]
     step_up_ttl: timedelta = timedelta(minutes=5)
+    identifier_change_ttl: timedelta = timedelta(minutes=5)
 
     def authenticate(
         self,
@@ -124,6 +126,55 @@ class IdentityApplication:
             authentication_methods=[*context.authentication_methods, "otp"],
             correlation_id=context.correlation_id,
             ttl=self.step_up_ttl,
+        )
+
+    def verify_identifier_change(
+        self,
+        *,
+        context: AuthContext,
+        otp_id: UUID,
+        code: str,
+        purpose: OtpPurpose,
+    ) -> str:
+        """Exchange an owned candidate OTP for a session-bound change grant.
+
+        Args:
+            context: Authenticated principal verifying the candidate.
+            otp_id: Opaque candidate verification challenge.
+            code: Raw one-time code sent to the candidate.
+            purpose: `VERIFY_EMAIL` or `VERIFY_PHONE`.
+
+        Returns:
+            Raw single-use grant token, returned once.
+
+        Raises:
+            OtpError: If the purpose, owner, channel, or account is invalid.
+        """
+        binding = binding_for_otp_purpose(purpose)
+        if binding is None:
+            raise OtpError("OTP challenge is unavailable.")
+        challenge = self.otp.verify(
+            otp_id,
+            binding.otp_purpose,
+            code,
+            expected_user_id=context.user_id,
+        )
+        account = self.accounts.get_by_id(context.user_id)
+        if (
+            challenge.channel != binding.channel
+            or account is None
+            or account.status != AccountStatus.ACTIVE
+        ):
+            raise OtpError("OTP challenge is unavailable.")
+        return self.grants.create(
+            user_id=context.user_id,
+            session_id=context.session_id,
+            purpose=binding.grant_purpose,
+            action_class=binding.action_class,
+            subject_hash=challenge.destination_hash,
+            authentication_methods=[*context.authentication_methods, "otp"],
+            correlation_id=context.correlation_id,
+            ttl=self.identifier_change_ttl,
         )
 
 

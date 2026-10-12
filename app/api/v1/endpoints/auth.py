@@ -21,7 +21,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.modules.identity.application import IdentityApplication
 from app.modules.identity.grants import AuthGrantError
-from app.modules.identity.otp import OtpError
+from app.modules.identity.otp import OtpCodeInvalidError, OtpError
 from app.modules.identity.passwords import PasswordPolicyError
 from app.modules.identity.rate_limits import RateLimitExceeded
 from app.modules.identity.schemas import (
@@ -133,7 +133,7 @@ def verify_otp(
     application: Annotated[IdentityApplication, Depends(get_identity_application)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> OtpVerifyResponse:
-    """Verify registration, reset, or step-up OTP ceremonies."""
+    """Verify registration, reset, step-up, or candidate identifier OTPs."""
     try:
         grant = _verify_otp_by_purpose(payload, application, authorization)
         db.commit()
@@ -141,6 +141,9 @@ def verify_otp(
     except RateLimitExceeded as exc:
         db.rollback()
         raise _rate_limit_error(exc) from exc
+    except OtpCodeInvalidError as exc:
+        db.commit()
+        raise _request_error(str(exc)) from exc
     except (OtpError, TokenError, SessionError, AccountServiceError) as exc:
         db.rollback()
         raise _request_error(str(exc)) from exc
@@ -389,6 +392,18 @@ def _verify_otp_by_purpose(
             otp_id=payload.challenge_id,
             code=payload.code,
             action_class=payload.action_class,
+        )
+    if payload.purpose in {OtpPurpose.VERIFY_EMAIL, OtpPurpose.VERIFY_PHONE}:
+        if authorization is None:
+            raise TokenError("Identifier verification is unavailable.")
+        return application.verify_identifier_change(
+            context=application.authenticate(
+                authorization.removeprefix("Bearer ").strip(),
+                uuid4(),
+            ),
+            otp_id=payload.challenge_id,
+            code=payload.code,
+            purpose=payload.purpose,
         )
     raise OtpError("OTP purpose is unavailable.")
 

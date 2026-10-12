@@ -269,8 +269,21 @@ class SessionService:
         *,
         current_session_id: UUID | None = None,
         keep_current: bool = False,
+        reason: str = "USER_REVOKED_ALL",
+        notify: bool = True,
     ) -> None:
-        """Revoke owned sessions and invalidate prior access tokens."""
+        """Revoke owned sessions and invalidate prior access tokens.
+
+        Args:
+            user_id: Account whose sessions are revoked.
+            current_session_id: Session preserved when `keep_current` is set.
+            keep_current: Whether to preserve `current_session_id`.
+            reason: PII-free revocation reason persisted on revoked rows.
+            notify: Whether to queue the generic sessions-revoked notice.
+
+        Raises:
+            SessionError: If the account is unavailable.
+        """
         account = self.account_repository.get_by_id(user_id, for_update=True)
         if account is None:
             raise SessionError("Account is unavailable.")
@@ -278,7 +291,7 @@ class SessionService:
         self.repository.revoke_all_by_user(
             user_id,
             self.clock(),
-            "USER_REVOKED_ALL",
+            reason,
             exception,
         )
         account.auth_version += 1
@@ -289,7 +302,8 @@ class SessionService:
                 resource_id=user_id,
                 actor_user_id=user_id,
             )
-        self._notify(account, "SESSIONS_REVOKED")
+        if notify:
+            self._notify(account, "SESSIONS_REVOKED")
         self.repository.flush()
 
     def _notify(self, account: UserAccount, event_code: str) -> None:

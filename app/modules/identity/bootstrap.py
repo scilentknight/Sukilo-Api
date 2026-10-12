@@ -104,6 +104,23 @@ class DevelopmentCountryReader:
             status="ACTIVE",
         )
 
+    def resolve_country_id(self, country_id: UUID) -> CountryReference:
+        """Resolve a deterministic development country identifier.
+
+        Args:
+            country_id: Stable country identifier.
+
+        Returns:
+            Matching country reference.
+
+        Raises:
+            KeyError: If the identifier is not a development country.
+        """
+        code = country_id.bytes.rstrip(b"\0").decode("ascii")
+        if len(code) != 2 or not code.isalpha():
+            raise KeyError("Country is unavailable.")
+        return self.resolve_country(code)
+
     def is_operation_enabled(self, country_id: UUID, operation: str) -> bool:
         """Enable authentication operations in development.
 
@@ -119,6 +136,9 @@ class DevelopmentCountryReader:
             "REGISTER",
             "LOGIN",
             "RESET",
+            "CUSTOMER_PREFERENCE",
+            "CUSTOMER_ADDRESS",
+            "CUSTOMER_IDENTIFIER_CHANGE",
             "iam.assignment.manage",
         }
 

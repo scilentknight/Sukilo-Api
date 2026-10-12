@@ -71,3 +71,40 @@ def test_development_country_reader_enables_assignment_management() -> None:
         country.country_id,
         "iam.assignment.manage",
     )
+
+
+def test_development_country_reader_enables_customer_preferences() -> None:
+    """Allow local testing of customer preference selection."""
+    reader = DevelopmentCountryReader()
+    country = reader.resolve_country("NP")
+    assert reader.is_operation_enabled(
+        country.country_id,
+        "CUSTOMER_PREFERENCE",
+    )
+
+
+def test_development_country_reader_enables_customer_addresses() -> None:
+    """Allow local testing of customer address management."""
+    reader = DevelopmentCountryReader()
+    country = reader.resolve_country("NP")
+    assert reader.is_operation_enabled(
+        country.country_id,
+        "CUSTOMER_ADDRESS",
+    )
+
+
+def test_development_country_reader_resolves_stable_country_ids() -> None:
+    """Reverse deterministic development country identifiers."""
+    reader = DevelopmentCountryReader()
+    country = reader.resolve_country("NP")
+    assert reader.resolve_country_id(country.country_id).code == "NP"
+
+
+def test_development_country_reader_enables_identifier_changes() -> None:
+    """Allow local testing of verified identifier replacement."""
+    reader = DevelopmentCountryReader()
+    country = reader.resolve_country("NP")
+    assert reader.is_operation_enabled(
+        country.country_id,
+        "CUSTOMER_IDENTIFIER_CHANGE",
+    )

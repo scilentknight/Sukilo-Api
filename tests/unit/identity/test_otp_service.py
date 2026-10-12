@@ -96,3 +96,33 @@ def test_otp_is_single_use_and_attempt_limited() -> None:
     service.verify(otp_id, OtpPurpose.REGISTER, "123456")
     with pytest.raises(OtpError, match="unavailable"):
         service.verify(otp_id, OtpPurpose.REGISTER, "123456")
+
+
+def test_expected_user_mismatch_does_not_consume_challenge() -> None:
+    """Reject a foreign owner before attempts or success are recorded."""
+    now = datetime(2026, 10, 12, tzinfo=UTC)
+    service, repository, _ = _service(now)
+    otp_id = service.request(
+        user_id=UUID(int=1),
+        destination="new@example.com",
+        channel=OtpChannel.EMAIL,
+        purpose=OtpPurpose.VERIFY_EMAIL,
+        locale_code="en-NP",
+    )
+    with pytest.raises(OtpError, match="unavailable"):
+        service.verify(
+            otp_id,
+            OtpPurpose.VERIFY_EMAIL,
+            "123456",
+            expected_user_id=UUID(int=2),
+        )
+    row = repository.rows[otp_id]
+    assert row.verified_at is None
+    assert row.attempt_count == 0
+    verified = service.verify(
+        otp_id,
+        OtpPurpose.VERIFY_EMAIL,
+        "123456",
+        expected_user_id=UUID(int=1),
+    )
+    assert verified.verified_at == now

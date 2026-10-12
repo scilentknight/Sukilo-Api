@@ -138,3 +138,81 @@ def test_logout_invalidates_session_for_access_validation() -> None:
     service.revoke_by_refresh_token(pair.refresh_token)
     with pytest.raises(SessionError):
         service.assert_active(account.user_id, pair.session_id)
+
+
+class RevokeAllRepositoryFake(SessionRepositoryFake):
+    """Capture bulk revocation arguments."""
+
+    def __init__(self) -> None:
+        """Initialize empty capture."""
+        super().__init__()
+        self.revocations = []
+
+    def revoke_all_by_user(self, user_id, now, reason, except_session_id):
+        """Record one bulk revocation."""
+        self.revocations.append((user_id, now, reason, except_session_id))
+
+
+class SecurityNotificationFake:
+    """Capture security notifications."""
+
+    def __init__(self) -> None:
+        """Initialize empty deliveries."""
+        self.security = []
+
+    def send_security(self, notification):
+        """Capture one notification."""
+        self.security.append(notification)
+
+
+def _revoke_all_service(account, notifications):
+    repository = RevokeAllRepositoryFake()
+    service = SessionService(
+        repository=repository,
+        account_repository=AccountRepositoryFake(account),
+        digests=DigestService(active_key_id="v1", peppers={"v1": b"pepper"}),
+        tokens=TokenServiceFake(),
+        clock=lambda: datetime(2026, 10, 12, tzinfo=UTC),
+        refresh_ttl=timedelta(days=30),
+        notifications=notifications,
+    )
+    return service, repository
+
+
+def test_revoke_all_can_keep_current_with_custom_reason_and_no_notice() -> None:
+    """Allow callers to send their own notice and record a precise reason."""
+    account = UserAccount(
+        user_id=UUID(int=1),
+        email="buyer@example.com",
+        status=AccountStatus.ACTIVE,
+        auth_version=4,
+    )
+    notifications = SecurityNotificationFake()
+    service, repository = _revoke_all_service(account, notifications)
+    service.revoke_all(
+        account.user_id,
+        current_session_id=UUID(int=5),
+        keep_current=True,
+        reason="IDENTIFIER_CHANGED",
+        notify=False,
+    )
+    assert account.auth_version == 5
+    assert repository.revocations[0][2:] == ("IDENTIFIER_CHANGED", UUID(int=5))
+    assert notifications.security == []
+
+
+def test_revoke_all_default_behavior_is_unchanged() -> None:
+    """Keep the original reason and notification for sign-out-all."""
+    account = UserAccount(
+        user_id=UUID(int=1),
+        email="buyer@example.com",
+        status=AccountStatus.ACTIVE,
+        auth_version=1,
+    )
+    notifications = SecurityNotificationFake()
+    service, repository = _revoke_all_service(account, notifications)
+    service.revoke_all(account.user_id)
+    assert repository.revocations[0][2:] == ("USER_REVOKED_ALL", None)
+    assert [item.event_code for item in notifications.security] == [
+        "SESSIONS_REVOKED"
+    ]

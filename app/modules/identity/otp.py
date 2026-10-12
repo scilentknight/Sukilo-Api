@@ -43,6 +43,10 @@ class OtpError(Exception):
     """Report an enumeration-safe OTP failure."""
 
 
+class OtpCodeInvalidError(OtpError):
+    """Report an invalid code whose persisted attempt must be committed."""
+
+
 class OtpService:
     """Manage secure single-use OTP challenges."""
 
@@ -139,8 +143,25 @@ class OtpService:
         otp_id: UUID,
         purpose: OtpPurpose,
         code: str,
+        *,
+        expected_user_id: UUID | None = None,
     ) -> OtpChallenge:
-        """Consume a valid OTP challenge exactly once."""
+        """Consume a valid OTP challenge exactly once.
+
+        Args:
+            otp_id: Opaque challenge identifier.
+            purpose: Purpose the caller requires.
+            code: Raw one-time code supplied by the user.
+            expected_user_id: Owner the challenge must belong to. A mismatch
+                is rejected before any attempt or success is recorded.
+
+        Returns:
+            The verified challenge.
+
+        Raises:
+            OtpCodeInvalidError: If the code is invalid.
+            OtpError: If the challenge is unavailable.
+        """
         challenge = self.repository.get_for_update(otp_id)
         now = self.clock()
         if self.rate_limiter is not None:
@@ -149,6 +170,8 @@ class OtpService:
                 RateLimitPolicy(limit=self.max_attempts, window=self.ttl),
             )
         if challenge is None or challenge.purpose != purpose:
+            raise OtpError("OTP challenge is unavailable.")
+        if expected_user_id is not None and challenge.user_id != expected_user_id:
             raise OtpError("OTP challenge is unavailable.")
         if (
             challenge.verified_at is not None
@@ -168,7 +191,7 @@ class OtpService:
         if not valid:
             challenge.attempt_count += 1
             self.repository.flush()
-            raise OtpError("OTP code is invalid.")
+            raise OtpCodeInvalidError("OTP code is invalid.")
         challenge.verified_at = now
         if self.events is not None:
             self.events.record(

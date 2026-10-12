@@ -30,6 +30,10 @@ class CountryReader(Protocol):
         """Resolve a country code."""
         ...
 
+    def resolve_country_id(self, country_id: UUID) -> CountryReference:
+        """Resolve a stable country identifier."""
+        ...
+
     def is_operation_enabled(self, country_id: UUID, operation: str) -> bool:
         """Return whether a country operation is enabled."""
         ...
