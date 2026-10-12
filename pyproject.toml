@@ -17,6 +17,8 @@ dependencies = [
     "torchvision>=0.17.0",
     "pillow>=10.4.0",
     "python-multipart>=0.0.9",
+    "email-validator>=2.3.0",
+    "phonenumbers>=9.0.41",
 ]
 
 [tool.uv]
