@@ -1,3 +1,5 @@
+"""Configure Alembic for Sukilo database migrations."""
+
 import os
 import sys
 from logging.config import fileConfig
@@ -10,9 +12,9 @@ from alembic import context
 # Ensure app is in python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import app.models  # noqa: F401
 from app.core.config import settings
 from app.core.database import Base
-import app.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -53,8 +55,9 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_schemas=True,
+        compare_server_default=True,
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
@@ -71,12 +74,13 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
-
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            include_schemas=True,
+            compare_server_default=True,
         )
-
         with context.begin_transaction():
             context.run_migrations()
 

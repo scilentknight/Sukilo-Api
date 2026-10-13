@@ -9,6 +9,9 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 
 from app.core.config import settings
+from app.modules.access.bootstrap import configure_access
+from app.modules.customers.bootstrap import configure_customers
+from app.modules.identity.bootstrap import configure_identity
 from app.services.embedding_service import EmbeddingService
 from app.services.vector_service import VectorService
 
@@ -50,8 +53,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     app.state.embedding_service = None
     app.state.vector_service = None
+    app.state.identity_application_factory = None
+    app.state.access_application_factory = None
+    app.state.customer_application_factory = None
+    configure_identity(app, settings)
+    configure_access(app, settings)
+    configure_customers(app, settings)
     if settings.ENABLE_VECTOR_STACK:
         _initialize_vector_stack(app)
     yield
+    app.state.customer_application_factory = None
+    app.state.access_application_factory = None
+    app.state.identity_application_factory = None
     app.state.embedding_service = None
     app.state.vector_service = None
