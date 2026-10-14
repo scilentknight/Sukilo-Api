@@ -1,8 +1,9 @@
 """Load validated application and authentication settings."""
 
+from email.utils import formataddr
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,6 +41,31 @@ class Settings(BaseSettings):
     AUTH_DIGEST_PEPPER_REFERENCE: str | None = None
     REDIS_URL: str | None = None
     SMTP_PROVIDER_REFERENCE: str | None = None
+    SMTP_HOST: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SMTP_HOST", "MAIL_HOST"),
+    )
+    SMTP_PORT: int = Field(
+        default=587,
+        validation_alias=AliasChoices("SMTP_PORT", "MAIL_PORT"),
+    )
+    SMTP_USERNAME: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SMTP_USERNAME", "MAIL_USERNAME"),
+    )
+    SMTP_PASSWORD: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SMTP_PASSWORD", "MAIL_PASSWORD"),
+    )
+    SMTP_FROM: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SMTP_FROM", "MAIL_FROM_ADDRESS"),
+    )
+    SMTP_STARTTLS: bool = True
+    SMTP_USE_SSL: bool = False
+    MAIL_ENCRYPTION: str | None = None
+    MAIL_FROM_NAME: str | None = None
+    REQUIRE_EMAIL_VERIFICATION: bool = True
     AUTH_COOKIE_SECURE: bool = True
     AUTH_COOKIE_SAMESITE: str = "lax"
     AUTH_COOKIE_NAME: str = "sukilo_refresh"
@@ -51,6 +77,24 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def apply_mail_settings(self) -> Self:
+        """Map MAIL_ENCRYPTION and the display name onto the SMTP sender."""
+        encryption = (self.MAIL_ENCRYPTION or "").strip().casefold()
+        if encryption in {"ssl", "smtps"}:
+            self.SMTP_STARTTLS = False
+            self.SMTP_USE_SSL = True
+        elif encryption in {"tls", "starttls"}:
+            self.SMTP_STARTTLS = True
+            self.SMTP_USE_SSL = False
+        if self.SMTP_PASSWORD:
+            self.SMTP_PASSWORD = self.SMTP_PASSWORD.replace(" ", "")
+        name = (self.MAIL_FROM_NAME or "").strip()
+        address = (self.SMTP_FROM or "").strip()
+        if name and address and "<" not in address:
+            self.SMTP_FROM = formataddr((name, address))
+        return self
 
     @model_validator(mode="after")
     def validate_production_auth(self) -> Self:

@@ -90,7 +90,7 @@ class AssignmentRepository:
             if scope_id is None
             else UserRoleAssignment.scope_id == scope_id
         )
-        statement = select(UserRoleAssignment.assignment_id).where(
+        conditions = [
             UserRoleAssignment.user_id == user_id,
             UserRoleAssignment.role_id == role_id,
             UserRoleAssignment.scope_type == scope_type,
@@ -100,17 +100,22 @@ class AssignmentRepository:
                 UserRoleAssignment.valid_to.is_(None),
                 UserRoleAssignment.valid_to > now,
             ),
-            or_(
-                valid_from is None,
-                UserRoleAssignment.valid_to.is_(None),
-                UserRoleAssignment.valid_to > valid_from,
-            ),
-            or_(
-                valid_to is None,
-                UserRoleAssignment.valid_from.is_(None),
-                UserRoleAssignment.valid_from < valid_to,
-            ),
-        ).limit(1)
+        ]
+        if valid_from is not None:
+            conditions.append(
+                or_(
+                    UserRoleAssignment.valid_to.is_(None),
+                    UserRoleAssignment.valid_to > valid_from,
+                )
+            )
+        if valid_to is not None:
+            conditions.append(
+                or_(
+                    UserRoleAssignment.valid_from.is_(None),
+                    UserRoleAssignment.valid_from < valid_to,
+                )
+            )
+        statement = select(UserRoleAssignment.assignment_id).where(*conditions).limit(1)
         return self.db.scalar(statement) is not None
 
     def list_active_projections(
@@ -148,6 +153,32 @@ class AssignmentRepository:
         )
         rows = self.db.execute(statement).all()
         return _build_projections(rows)
+
+    def list_active_role_codes(self, user_id: UUID, now: datetime) -> list[str]:
+        """Return distinct active role codes for one account."""
+        statement = (
+            select(Role.code)
+            .join(
+                UserRoleAssignment,
+                UserRoleAssignment.role_id == Role.role_id,
+            )
+            .where(
+                UserRoleAssignment.user_id == user_id,
+                UserRoleAssignment.revoked_at.is_(None),
+                or_(
+                    UserRoleAssignment.valid_from.is_(None),
+                    UserRoleAssignment.valid_from <= now,
+                ),
+                or_(
+                    UserRoleAssignment.valid_to.is_(None),
+                    UserRoleAssignment.valid_to > now,
+                ),
+                Role.status == RoleStatus.ACTIVE,
+            )
+            .distinct()
+            .order_by(Role.code)
+        )
+        return list(self.db.scalars(statement))
 
     def get_role_by_code_for_update(self, code: str) -> Role | None:
         """Lock and return a role by stable code."""

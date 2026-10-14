@@ -19,6 +19,7 @@ from app.modules.access.policies import ResourceScope, ScopeValidationError
 from app.modules.access.schemas import (
     AssignmentResponse,
     GrantAssignmentRequest,
+    OwnAccessResponse,
     PermissionResponse,
     RevokeAssignmentRequest,
     RoleResponse,
@@ -38,6 +39,20 @@ from app.modules.identity.grants import AuthGrantError
 
 
 router = APIRouter(prefix="/access", tags=["Access"])
+
+
+@router.get("/me", response_model=OwnAccessResponse)
+def read_own_access(
+    context: Annotated[AuthContext, Depends(require_authenticated)],
+    application: Annotated[
+        AccessApplication,
+        Depends(get_access_application),
+    ],
+) -> OwnAccessResponse:
+    """Return the signed-in account's active role codes."""
+    return OwnAccessResponse(
+        roles=application.assignments.list_own_role_codes(context)
+    )
 
 
 @router.get("/roles", response_model=list[RoleResponse])

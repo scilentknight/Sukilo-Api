@@ -48,6 +48,10 @@ class AssignmentRepositoryPort(Protocol):
         """Return current authorization projections."""
         ...
 
+    def list_active_role_codes(self, user_id: UUID, now: datetime) -> list[str]:
+        """Return the caller's current role codes."""
+        ...
+
     def acquire_overlap_lock(
         self,
         user_id: UUID,

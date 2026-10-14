@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.modules.identity.application import IdentityApplication
 from app.modules.identity.grants import AuthGrantError
+from app.modules.identity.mail import clear_development_code, take_development_code
 from app.modules.identity.otp import OtpCodeInvalidError, OtpError
 from app.modules.identity.passwords import PasswordPolicyError
 from app.modules.identity.rate_limits import RateLimitExceeded
@@ -77,9 +78,18 @@ def get_auth_context(
         raise _auth_error() from exc
 
 
+def _accepted(challenge_id: UUID) -> ChallengeAcceptedResponse:
+    """Attach a development code only when mail was saved locally."""
+    code = take_development_code()
+    if settings.APP_ENV.casefold() == "production":
+        code = None
+    return ChallengeAcceptedResponse(challenge_id=challenge_id, dev_code=code)
+
+
 @router.post(
     "/register",
     response_model=ChallengeAcceptedResponse,
+    response_model_exclude_none=True,
     status_code=status.HTTP_202_ACCEPTED,
 )
 def register(
@@ -88,21 +98,34 @@ def register(
     application: Annotated[IdentityApplication, Depends(get_identity_application)],
 ) -> ChallengeAcceptedResponse:
     """Register a pending global account and request verification."""
+    clear_development_code()
     try:
         challenge_id = application.registration.register(**payload.model_dump())
         db.commit()
-        return ChallengeAcceptedResponse(challenge_id=challenge_id)
+        return _accepted(challenge_id)
     except RateLimitExceeded as exc:
         db.rollback()
+        clear_development_code()
         raise _rate_limit_error(exc) from exc
     except (AccountServiceError, PasswordPolicyError) as exc:
         db.rollback()
+        clear_development_code()
         raise _request_error(str(exc)) from exc
+    except RuntimeError as exc:
+        db.rollback()
+        clear_development_code()
+        if str(exc) != "Email delivery failed.":
+            raise
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Email delivery failed. Try again.",
+        ) from exc
 
 
 @router.post(
     "/otp/request",
     response_model=ChallengeAcceptedResponse,
+    response_model_exclude_none=True,
     status_code=status.HTTP_202_ACCEPTED,
 )
 def request_otp(
@@ -113,6 +136,7 @@ def request_otp(
     """Request an enumeration-safe recovery OTP."""
     if payload.purpose != OtpPurpose.RESET:
         raise _request_error("This OTP purpose is not externally enabled.")
+    clear_development_code()
     try:
         challenge_id = application.recovery.request(
             email=payload.identifier,
@@ -120,9 +144,10 @@ def request_otp(
             country_code=payload.country_code,
         )
         db.commit()
-        return ChallengeAcceptedResponse(challenge_id=challenge_id)
+        return _accepted(challenge_id)
     except RateLimitExceeded as exc:
         db.rollback()
+        clear_development_code()
         raise _rate_limit_error(exc) from exc
 
 
@@ -174,8 +199,11 @@ def login(
             ),
         )
         db.commit()
-        _set_session_cookies(response, pair)
-        return AccessTokenResponse(access_token=pair.access_token)
+        csrf_token = _set_session_cookies(response, pair)
+        return AccessTokenResponse(
+            access_token=pair.access_token,
+            csrf_token=csrf_token,
+        )
     except RateLimitExceeded as exc:
         db.rollback()
         raise _rate_limit_error(exc) from exc
@@ -187,6 +215,7 @@ def login(
 @router.post(
     "/password/forgot",
     response_model=ChallengeAcceptedResponse,
+    response_model_exclude_none=True,
     status_code=status.HTTP_202_ACCEPTED,
 )
 def forgot_password(
@@ -195,6 +224,7 @@ def forgot_password(
     application: Annotated[IdentityApplication, Depends(get_identity_application)],
 ) -> ChallengeAcceptedResponse:
     """Request password recovery without revealing account existence."""
+    clear_development_code()
     try:
         challenge_id = application.recovery.request(
             email=str(payload.email),
@@ -202,9 +232,10 @@ def forgot_password(
             country_code=payload.country_code,
         )
         db.commit()
-        return ChallengeAcceptedResponse(challenge_id=challenge_id)
+        return _accepted(challenge_id)
     except RateLimitExceeded as exc:
         db.rollback()
+        clear_development_code()
         raise _rate_limit_error(exc) from exc
 
 
@@ -231,6 +262,7 @@ def reset_password(
 @router.post(
     "/step-up/request",
     response_model=ChallengeAcceptedResponse,
+    response_model_exclude_none=True,
     status_code=status.HTTP_202_ACCEPTED,
 )
 def request_step_up(
@@ -240,6 +272,7 @@ def request_step_up(
     application: Annotated[IdentityApplication, Depends(get_identity_application)],
 ) -> ChallengeAcceptedResponse:
     """Request session-bound step-up authentication."""
+    clear_development_code()
     try:
         challenge_id = application.request_step_up(
             context=context,
@@ -247,12 +280,14 @@ def request_step_up(
             locale_code=payload.locale_code,
         )
         db.commit()
-        return ChallengeAcceptedResponse(challenge_id=challenge_id)
+        return _accepted(challenge_id)
     except RateLimitExceeded as exc:
         db.rollback()
+        clear_development_code()
         raise _rate_limit_error(exc) from exc
     except TokenError as exc:
         db.rollback()
+        clear_development_code()
         raise _auth_error() from exc
 
 
@@ -276,8 +311,11 @@ def refresh_token(
     try:
         pair = application.sessions.rotate(refresh_token)
         db.commit()
-        _set_session_cookies(response, pair)
-        return AccessTokenResponse(access_token=pair.access_token)
+        csrf_token = _set_session_cookies(response, pair)
+        return AccessTokenResponse(
+            access_token=pair.access_token,
+            csrf_token=csrf_token,
+        )
     except SessionError as exc:
         db.commit()
         _clear_session_cookies(response)
@@ -419,7 +457,7 @@ def _verify_otp_by_purpose(
     raise OtpError("OTP purpose is unavailable.")
 
 
-def _set_session_cookies(response: Response, pair: TokenPair) -> None:
+def _set_session_cookies(response: Response, pair: TokenPair) -> str:
     csrf_token = secrets.token_urlsafe(32)
     common = {
         "secure": settings.AUTH_COOKIE_SECURE,
@@ -439,6 +477,7 @@ def _set_session_cookies(response: Response, pair: TokenPair) -> None:
         httponly=False,
         **common,
     )
+    return csrf_token
 
 
 def _clear_session_cookies(response: Response) -> None:

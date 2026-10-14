@@ -68,6 +68,28 @@ def test_overlap_query_is_parameterized_and_filters_active_windows() -> None:
     assert ROLE_ID in params.values()
 
 
+def test_overlap_query_accepts_open_ended_windows() -> None:
+    """Treat omitted validity bounds as unbounded instead of comparing NULL."""
+    db = MagicMock()
+    db.scalar.return_value = None
+    repository = AssignmentRepository(db)
+    result = repository.has_active_overlap(
+        user_id=USER_ID,
+        role_id=ROLE_ID,
+        scope_type=ScopeType.GLOBAL,
+        scope_id=None,
+        valid_from=None,
+        valid_to=None,
+        now=NOW,
+    )
+    statement = db.scalar.call_args.args[0]
+    sql, params = _compiled(statement)
+    assert result is False
+    assert "scope_id IS NULL" in sql
+    assert "valid_from IS NULL OR" not in sql
+    assert list(params.values()).count(NOW) == 1
+
+
 def test_active_projection_query_filters_role_permission_and_validity() -> None:
     """Resolve only current active role and permission mappings."""
     db = MagicMock()

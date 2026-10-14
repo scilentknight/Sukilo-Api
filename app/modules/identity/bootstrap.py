@@ -16,6 +16,7 @@ from redis import Redis
 from app.core.config import Settings
 from app.core.security import DigestService
 from app.modules.identity.application import IdentityApplicationBuilder
+from app.modules.identity.mail import DevelopmentOutboxSender, SmtpNotificationSender
 from app.modules.identity.notifications import (
     NotificationSender,
     OtpNotification,
@@ -85,6 +86,32 @@ class LoggingNotificationSender:
         )
 
 
+def build_notification_sender(settings: Settings) -> NotificationSender:
+    """Send mail through SMTP, or save it locally when SMTP is not configured.
+
+    Args:
+        settings: Validated application settings.
+
+    Returns:
+        Sender that never logs message bodies or one-time codes.
+    """
+    host = (settings.SMTP_HOST or "").strip()
+    sender = (settings.SMTP_FROM or "").strip()
+    if host and sender:
+        return SmtpNotificationSender(
+            host=host,
+            port=settings.SMTP_PORT,
+            username=(settings.SMTP_USERNAME or "").strip() or None,
+            password=settings.SMTP_PASSWORD,
+            sender=sender,
+            starttls=settings.SMTP_STARTTLS,
+            use_ssl=settings.SMTP_USE_SSL,
+        )
+    if settings.APP_ENV.casefold() == "production":
+        return LoggingNotificationSender()
+    return DevelopmentOutboxSender(Path("data") / "outbox")
+
+
 class DevelopmentCountryReader:
     """Allow registration and login for any ISO alpha-2 market in development."""
 
@@ -136,6 +163,7 @@ class DevelopmentCountryReader:
             "REGISTER",
             "LOGIN",
             "RESET",
+            "RESET_PASSWORD",
             "CUSTOMER_PREFERENCE",
             "CUSTOMER_ADDRESS",
             "CUSTOMER_IDENTIFIER_CHANGE",
@@ -254,7 +282,7 @@ def build_identity_application_factory(
         digests=digests,
         tokens=tokens,
         countries=countries or DevelopmentCountryReader(),
-        notifications=notifications or LoggingNotificationSender(),
+        notifications=notifications or build_notification_sender(settings),
         rate_limiter=rate_limiter,
         audit_writer=audit_writer or NoOpAuditWriter(),
         clock=lambda: datetime.now(UTC),

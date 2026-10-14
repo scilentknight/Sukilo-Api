@@ -1,19 +1,19 @@
 import logging
+
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-
-from app.repositories.health_repository import HealthRepository
 
 logger = logging.getLogger(__name__)
 
 
 class HealthService:
     def __init__(self, db: Session):
-        self.repository = HealthRepository(db)
+        self.db = db
 
     def test_database_connection(self) -> dict:
         try:
-            connected = self.repository.check_db_connection()
+            connected = self.db.execute(text("SELECT 1")).scalar() == 1
             if connected:
                 return {"database": "connected"}
             return {"database": "error", "message": "Database query did not return expected result"}

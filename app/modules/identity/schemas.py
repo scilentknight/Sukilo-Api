@@ -37,10 +37,15 @@ class OtpVerifyRequest(BaseModel):
 
 
 class ChallengeAcceptedResponse(BaseModel):
-    """Return an opaque challenge and generic delivery status."""
+    """Return an opaque challenge and generic delivery status.
+
+    `dev_code` is present only in development when no SMTP server is configured.
+    Production responses omit it.
+    """
 
     challenge_id: UUID
     message: str = "If eligible, a verification message was sent."
+    dev_code: str | None = None
 
 
 class OtpVerifyResponse(BaseModel):
@@ -61,10 +66,15 @@ class LoginRequest(BaseModel):
 
 
 class AccessTokenResponse(BaseModel):
-    """Return a short-lived bearer token."""
+    """Return a short-lived bearer token and the session's CSRF value.
+
+    The CSRF cookie is scoped to the API origin, so cross-origin browser
+    clients cannot read it; they echo this value in `X-CSRF-Token` instead.
+    """
 
     access_token: str
     token_type: str = "bearer"
+    csrf_token: str | None = None
 
 
 class PasswordForgotRequest(BaseModel):

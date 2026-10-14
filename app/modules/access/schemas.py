@@ -8,6 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.modules.access.types import ScopeType
 
 
+class OwnAccessResponse(BaseModel):
+    """Expose the signed-in account's active role codes."""
+
+    roles: list[str]
+
+
 class RoleResponse(BaseModel):
     """Expose one active role definition."""
 

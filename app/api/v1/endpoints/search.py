@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.dependencies import get_embedding_service, get_vector_service
+from app.core.dependencies import (
+    get_embedding_service,
+    get_product_service,
+    get_vector_service,
+)
 from app.schemas.product import ProductRead
 from app.schemas.search import ImageSearchResponse
 from app.services.embedding_service import EmbeddingService
-from app.services.image_service import ImageService
 from app.services.product_service import ProductService
 from app.services.search_service import (
     DEFAULT_PRODUCT_LIMIT,
@@ -38,28 +39,10 @@ def _search_service(db: Session = Depends(get_db)) -> SearchService:
     return SearchService(db=db)
 
 
-def _product_service(db: Session = Depends(get_db)) -> ProductService:
-    """Build a product service for barcode lookup.
-
-    Args:
-        db: Request-scoped database session.
-
-    Returns:
-        Product service used for GTIN resolution.
-    """
-    image_service = ImageService(upload_dir=Path(settings.UPLOAD_DIR))
-    max_upload_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
-    return ProductService(
-        db=db,
-        image_service=image_service,
-        max_upload_bytes=max_upload_bytes,
-    )
-
-
 @router.get("/barcode", response_model=ProductRead)
 def search_product_by_barcode(
     code: str,
-    service: ProductService = Depends(_product_service),
+    service: ProductService = Depends(get_product_service),
 ) -> ProductRead:
     """Resolve a GS1 Digital Link or raw barcode to one product."""
     product = service.get_product_by_scanned_code(code)

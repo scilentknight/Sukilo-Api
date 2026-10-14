@@ -77,13 +77,17 @@ class ConfirmIdentifierChangeRequest(BaseModel):
 
 
 class PreferenceUpdateRequest(BaseModel):
-    """Replace complete market preferences with optimistic concurrency."""
+    """Create or replace complete market preferences with optimistic concurrency.
+
+    `expected_version` is omitted for the first write, when no preference row
+    exists yet, and must match the stored version afterwards.
+    """
 
     model_config = ConfigDict(extra="forbid")
     country_code: str = Field(min_length=2, max_length=2)
     locale_code: str = Field(min_length=2, max_length=12)
     currency_code: str = Field(min_length=3, max_length=3)
-    expected_version: int = Field(ge=1)
+    expected_version: int | None = Field(default=None, ge=1)
 
 
 class RecordConsentRequest(BaseModel):

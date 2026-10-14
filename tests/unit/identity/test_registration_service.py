@@ -47,6 +47,12 @@ class AccountRepositoryFake:
             return None
         return self.account
 
+    def get_by_phone(self, phone_e164: str):
+        """Return the stored account when phone numbers match."""
+        if self.account is None or self.account.phone_e164 != phone_e164:
+            return None
+        return self.account
+
     def flush(self) -> None:
         """Mark that staged changes were flushed."""
         self.flushed = True
@@ -121,6 +127,74 @@ def test_pending_registration_overwrites_password_and_resends_otp() -> None:
             "locale_code": "en-US",
         }
     ]
+
+
+def test_pending_phone_registration_moves_to_the_new_email_and_sends_otp() -> None:
+    """Resend verification when an unfinished signup already owns the phone."""
+    now = datetime(2026, 10, 12, tzinfo=UTC)
+    passwords = PasswordHasher()
+    pending = UserAccount(
+        user_id=UUID(int=9),
+        email="old@example.com",
+        phone_e164="+9779861252006",
+        status=AccountStatus.PENDING,
+        password_hash=passwords.hash_password("old-password-123"),
+        auth_version=1,
+    )
+    repository = AccountRepositoryFake(pending)
+    otp = OtpServiceFake()
+    service = RegistrationService(
+        accounts=AccountServiceFake(),
+        account_repository=repository,
+        passwords=passwords,
+        otp=otp,
+        countries=CountryReaderFake(),
+        clock=lambda: now,
+    )
+    challenge_id = service.register(
+        email="student@example.com",
+        phone_e164="+9779861252006",
+        password="owner-password-12",
+        country_code="NP",
+        locale_code="en",
+    )
+    assert challenge_id == otp.challenge_id
+    assert pending.email == "student@example.com"
+    assert otp.requests[0]["destination"] == "student@example.com"
+
+
+def test_active_phone_conflict_does_not_send_otp() -> None:
+    """Keep an active phone conflict indistinguishable from a new signup."""
+    now = datetime(2026, 10, 12, tzinfo=UTC)
+    passwords = PasswordHasher()
+    active = UserAccount(
+        user_id=UUID(int=10),
+        email="owner@example.com",
+        phone_e164="+9779861252006",
+        status=AccountStatus.ACTIVE,
+        password_hash=passwords.hash_password("owner-password-12"),
+        auth_version=1,
+    )
+    repository = AccountRepositoryFake(active)
+    otp = OtpServiceFake()
+    service = RegistrationService(
+        accounts=AccountServiceFake(),
+        account_repository=repository,
+        passwords=passwords,
+        otp=otp,
+        countries=CountryReaderFake(),
+        clock=lambda: now,
+    )
+    challenge_id = service.register(
+        email="student@example.com",
+        phone_e164="+9779861252006",
+        password="another-password",
+        country_code="NP",
+        locale_code="en",
+    )
+    assert challenge_id != otp.challenge_id
+    assert otp.requests == []
+    assert active.email == "owner@example.com"
 
 
 def test_active_registration_conflict_returns_decoy_challenge() -> None:

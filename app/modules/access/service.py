@@ -160,6 +160,14 @@ class AssignmentService:
         self._require_catalog_read(actor, "iam.permission.read", country_id)
         return self.repository.list_active_permissions()
 
+    def list_own_role_codes(self, actor: AuthContext) -> list[str]:
+        """Return the signed-in account's active role codes.
+
+        Customers have no assignment and receive an empty list. This does not
+        require `iam.assignment.read`.
+        """
+        return self.repository.list_active_role_codes(actor.user_id, self.clock())
+
     def list_assignments(
         self,
         query: AssignmentQuery,

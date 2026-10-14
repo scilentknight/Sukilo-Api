@@ -477,6 +477,23 @@ def test_preference_update_conflict_returns_version_code() -> None:
     assert database.events == ["rollback"]
 
 
+def test_preference_first_write_omits_expected_version() -> None:
+    """Forward a missing version so the service can create the first row."""
+
+    class FirstWritePreferences(PreferencesFake):
+        def set_preferences(self, command: object) -> PreferenceView:
+            assert getattr(command, "expected_version") is None
+            return self.get_preferences(_context())
+
+    application = ApplicationFake()
+    application.preferences = FirstWritePreferences()
+    response = _client(application).put(
+        "/api/v1/me/preferences",
+        json={"country_code": "NP", "locale_code": "en-NP", "currency_code": "NPR"},
+    )
+    assert response.status_code == 200
+
+
 def test_consent_history_returns_items_and_next_cursor() -> None:
     """Paginate consent evidence with an opaque cursor."""
     response = _client().get(

@@ -144,9 +144,9 @@ class CustomerRepository:
         consent_ids = select(ConsentRecord.country_id).where(
             ConsentRecord.user_id == user_id
         )
-        preference_ids = select(UserPreference.country_id).where(
+        preference_ids = select(UserPreference.preferred_country_id).where(
             UserPreference.user_id == user_id,
-            UserPreference.country_id.is_not(None),
+            UserPreference.preferred_country_id.is_not(None),
         )
         statement = address_ids.union(consent_ids, preference_ids)
         return list(self.db.scalars(statement))

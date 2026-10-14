@@ -68,6 +68,19 @@ def test_history_sql_uses_bounded_parameterized_tuple_cursor() -> None:
     assert 25 in params.values()
 
 
+def test_country_ids_sql_unions_address_consent_and_preference_countries() -> None:
+    """Collect every country a customer has data in, for account closure."""
+    session = SessionFake()
+    repository = CustomerRepository(session)
+    repository.list_country_ids_by_user(USER_ID)
+    sql, params = _compiled(session)
+    assert "iam.address.country_id" in sql
+    assert "iam.consent_record.country_id" in sql
+    assert "iam.user_preference.preferred_country_id IS NOT NULL" in sql
+    assert "UNION" in sql
+    assert list(params.values()) == [USER_ID, USER_ID, USER_ID]
+
+
 def test_history_sql_allows_one_pagination_sentinel_row() -> None:
     """Allow the service to probe one row beyond the public page maximum."""
     session = SessionFake()

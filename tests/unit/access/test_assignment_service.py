@@ -96,6 +96,7 @@ class RepositoryFake:
         self.overlap = False
         self.locked = False
         self.list_calls = []
+        self.own_roles: list[str] = []
         self.actor_scope = _scope(COUNTRY_ID)
         self.actor_permissions = frozenset(
             {
@@ -133,6 +134,12 @@ class RepositoryFake:
         """Return target role capabilities."""
         assert role_id == ROLE_ID
         return self.permissions
+
+    def list_active_role_codes(self, user_id: UUID, now: datetime) -> list[str]:
+        """Return configured role codes for the caller."""
+        assert user_id == ACTOR_ID
+        assert now == NOW
+        return list(self.own_roles)
 
     def list_active_projections(
         self,
@@ -313,6 +320,20 @@ def test_grant_consumes_bound_step_up_and_stages_atomic_audit() -> None:
     assert cache.invalidated == []
     service.commit_invalidations()
     assert cache.invalidated == [(TARGET_ID, 1)]
+
+
+def test_own_roles_do_not_require_assignment_read() -> None:
+    """Return the caller's roles without an assignment-read permission."""
+    repository = RepositoryFake()
+    repository.own_roles = ["COUNTRY_ADMIN"]
+    service, *_rest = _service(repository)
+    assert service.list_own_role_codes(_context()) == ["COUNTRY_ADMIN"]
+
+
+def test_customer_own_roles_are_empty() -> None:
+    """Customers have no assignment, so their role list is empty."""
+    service, *_rest = _service()
+    assert service.list_own_role_codes(_context()) == []
 
 
 def test_catalog_read_uses_explicit_country_scope() -> None:

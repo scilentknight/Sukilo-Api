@@ -106,6 +106,22 @@ def test_login_sets_secure_refresh_and_csrf_cookies() -> None:
     assert all("Path=/api/v1/auth" in value for value in cookies)
 
 
+def test_login_returns_csrf_value_matching_cookie() -> None:
+    """Let cross-origin clients echo the CSRF value they cannot read."""
+    response = _client().post(
+        "/api/v1/auth/login",
+        json={
+            "identifier": "buyer@example.com",
+            "password": "password",
+            "country_code": "NP",
+        },
+    )
+    body = response.json()
+    assert body["csrf_token"]
+    assert response.cookies.get("sukilo_csrf") == body["csrf_token"]
+    assert "refresh-one" not in response.text
+
+
 def test_refresh_requires_origin_and_double_submit_csrf() -> None:
     """Reject cookie refresh without matching CSRF proof."""
     client = _client()
@@ -122,6 +138,7 @@ def test_refresh_requires_origin_and_double_submit_csrf() -> None:
     )
     assert accepted.status_code == 200
     assert accepted.json()["access_token"] == "access-two"
+    assert accepted.json()["csrf_token"] == accepted.cookies.get("sukilo_csrf")
 
 
 def test_invalid_otp_attempt_is_committed() -> None:

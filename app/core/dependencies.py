@@ -1,8 +1,15 @@
 """FastAPI dependencies for shared application services."""
 
-from fastapi import HTTPException, Request, status
+from pathlib import Path
 
+from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.core.database import get_db
 from app.services.embedding_service import EmbeddingService
+from app.services.image_service import ImageService
+from app.services.product_service import ProductService
 from app.services.vector_service import VectorService
 
 
@@ -46,3 +53,21 @@ def get_vector_service(request: Request) -> VectorService:
             detail="Vector service is not available.",
         )
     return service
+
+
+def get_product_service(db: Session = Depends(get_db)) -> ProductService:
+    """Build a product service for the current request.
+
+    Args:
+        db: Request-scoped database session.
+
+    Returns:
+        Configured product service instance.
+    """
+    image_service = ImageService(upload_dir=Path(settings.UPLOAD_DIR))
+    image_service.ensure_upload_root()
+    return ProductService(
+        db=db,
+        image_service=image_service,
+        max_upload_bytes=settings.MAX_UPLOAD_MB * 1024 * 1024,
+    )

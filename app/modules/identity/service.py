@@ -290,6 +290,28 @@ class RegistrationService:
                 purpose=OtpPurpose.REGISTER,
                 locale_code=locale_code,
             )
+        if phone_e164:
+            try:
+                normalized_phone = normalize_phone_e164(phone_e164)
+            except IdentifierValidationError as exc:
+                raise AccountValidationError(
+                    "IAM_IDENTIFIER_INVALID",
+                    "An account identifier is invalid.",
+                ) from exc
+            phone_owner = self.account_repository.get_by_phone(normalized_phone)
+            if phone_owner is not None:
+                if phone_owner.status != AccountStatus.PENDING:
+                    return new_uuid()
+                phone_owner.email = normalized_email
+                phone_owner.password_hash = password_hash
+                self.account_repository.flush()
+                return self.otp.request(
+                    user_id=phone_owner.user_id,
+                    destination=normalized_email,
+                    channel=OtpChannel.EMAIL,
+                    purpose=OtpPurpose.REGISTER,
+                    locale_code=locale_code,
+                )
         try:
             account = self.accounts.create_pending_local_account(
                 email=normalized_email,

@@ -16,6 +16,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from app.core.auth_context import AuthContext
+from app.core.config import settings
 from app.core.database import get_db
 from app.modules.access.dependencies import require_authenticated
 from app.modules.customers.application import CustomerApplication
@@ -61,6 +62,7 @@ from app.modules.customers.schemas import (
 )
 from app.modules.identity.grants import AuthGrantError
 from app.modules.identity.privacy import AccountClosureError
+from app.modules.identity.mail import clear_development_code, take_development_code
 from app.modules.identity.schemas import ChallengeAcceptedResponse
 from app.modules.customers.service import (
     AddressConflictError,
@@ -153,6 +155,7 @@ def confirm_closure(
 @router.post(
     "/data-export/verification",
     response_model=ChallengeAcceptedResponse,
+    response_model_exclude_none=True,
     status_code=status.HTTP_202_ACCEPTED,
 )
 def request_export_verification(
@@ -163,6 +166,7 @@ def request_export_verification(
     application: Annotated[CustomerApplication, Depends(get_customer_application)],
 ) -> ChallengeAcceptedResponse:
     """Verify the current password and send an export OTP."""
+    clear_development_code()
     try:
         challenge_id = application.exports.request_verification(
             context,
@@ -171,9 +175,13 @@ def request_export_verification(
         )
         db.commit()
         _apply_correlation(response, context)
-        return ChallengeAcceptedResponse(challenge_id=challenge_id)
+        code = take_development_code()
+        if settings.APP_ENV.casefold() == "production":
+            code = None
+        return ChallengeAcceptedResponse(challenge_id=challenge_id, dev_code=code)
     except Exception as exc:
         db.rollback()
+        clear_development_code()
         _raise_export_error(exc, context)
 
 

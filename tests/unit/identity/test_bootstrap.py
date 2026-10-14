@@ -93,6 +93,16 @@ def test_development_country_reader_enables_customer_addresses() -> None:
     )
 
 
+def test_development_country_reader_enables_password_reset() -> None:
+    """Allow local testing of password recovery requested with a country."""
+    reader = DevelopmentCountryReader()
+    country = reader.resolve_country("NP")
+    assert reader.is_operation_enabled(
+        country.country_id,
+        "RESET_PASSWORD",
+    )
+
+
 def test_development_country_reader_resolves_stable_country_ids() -> None:
     """Reverse deterministic development country identifiers."""
     reader = DevelopmentCountryReader()
