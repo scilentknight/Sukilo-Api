@@ -53,7 +53,12 @@ def test_seed_migration_matches_runtime_catalog_exactly() -> None:
     base = _load_migration("20261012_0013_seed_iam_access_catalog.py")
     added = _load_migration("20261028_0025_seed_vendor_access.py")
     store = _load_migration("20261028_0030_seed_store_permissions.py")
-    added_permissions = set(added.NEW_PERMISSION_CODES) | set(store.NEW_PERMISSION_CODES)
+    taxonomy = _load_migration("20261028_0035_seed_catalog_permissions.py")
+    added_permissions = (
+        set(added.NEW_PERMISSION_CODES)
+        | set(store.NEW_PERMISSION_CODES)
+        | set(taxonomy.NEW_PERMISSION_CODES)
+    )
     base_roles = {
         code: (UUID(role_id), name, scope_type)
         for role_id, code, name, scope_type in base.ROLES
@@ -83,6 +88,8 @@ def test_seed_migration_matches_runtime_catalog_exactly() -> None:
             "vendor.application.review",
             "vendor.application.approve",
             "vendor.payout.verify",
+            "catalog.category.enable",
+            "catalog.brand.review",
         }
     )
     assert "vendor.application.approve" not in base.ROLE_PERMISSIONS["COUNTRY_ADMIN"]

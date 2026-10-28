@@ -180,6 +180,26 @@ def test_vendor_migrations_follow_identity_head() -> None:
             "20261028_0030",
             "20261028_0029",
         ),
+        "20261028_0031_create_catalog_schema.py": (
+            "20261028_0031",
+            "20261028_0030",
+        ),
+        "20261028_0032_create_catalog_category.py": (
+            "20261028_0032",
+            "20261028_0031",
+        ),
+        "20261028_0033_create_catalog_attribute.py": (
+            "20261028_0033",
+            "20261028_0032",
+        ),
+        "20261028_0034_create_catalog_brand.py": (
+            "20261028_0034",
+            "20261028_0033",
+        ),
+        "20261028_0035_seed_catalog_permissions.py": (
+            "20261028_0035",
+            "20261028_0034",
+        ),
     }
     for filename, revisions in expected.items():
         migration = _load_migration(filename)

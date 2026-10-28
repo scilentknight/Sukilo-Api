@@ -124,6 +124,24 @@ class AssignmentVendorAuthorizer:
         )
         return decision.allowed
 
+    def allows_global(self, actor: AuthContext, permission: str) -> bool:
+        """Return whether the actor holds a permission at global scope.
+
+        Args:
+            actor: Authenticated principal.
+            permission: Permission code.
+
+        Returns:
+            Whether an active global assignment covers the permission.
+        """
+        scope = ResourceScope(ScopeType.GLOBAL, None, None, None)
+        projections = self.repository.list_active_projections(actor.user_id, self.clock())
+        decision = self.evaluator.evaluate(
+            AuthorizationRequest(actor, permission, scope, None),
+            projections,
+        )
+        return decision.allowed
+
 
 class SessionVendorRoleGranter:
     """Insert vendor role assignments on the current session."""

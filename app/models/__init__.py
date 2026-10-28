@@ -19,6 +19,20 @@ from app.modules.identity.models import (
     UserAccount,
     UserSession,
 )
+from app.modules.catalog.models import (
+    AttributeDefinition,
+    AttributeOption,
+    AttributeOptionTranslation,
+    AttributeTranslation,
+    Brand,
+    BrandCountry,
+    BrandRequest,
+    Category,
+    CategoryAttribute,
+    CategoryChangeRequest,
+    CategoryCountry,
+    CategoryTranslation,
+)
 from app.modules.vendor.models import (
     Store,
     StoreTranslation,
@@ -34,8 +48,20 @@ from app.models.product import Product, ProductImage
 
 __all__ = [
     "Address",
+    "AttributeDefinition",
+    "AttributeOption",
+    "AttributeOptionTranslation",
+    "AttributeTranslation",
     "AuthGrant",
     "AuthIdentity",
+    "Brand",
+    "BrandCountry",
+    "BrandRequest",
+    "Category",
+    "CategoryAttribute",
+    "CategoryChangeRequest",
+    "CategoryCountry",
+    "CategoryTranslation",
     "ConsentRecord",
     "DataExportRequest",
     "OtpChallenge",

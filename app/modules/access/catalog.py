@@ -73,6 +73,10 @@ PERMISSIONS = (
     _permission("vendor.store.write", "Update the vendor storefront."),
     _permission("vendor.warehouse.write", "Manage vendor warehouses."),
     _permission("vendor.payout.verify", "Verify a vendor payout account."),
+    _permission("catalog.category.write", "Create canonical categories."),
+    _permission("catalog.category.enable", "Enable a category in one country."),
+    _permission("catalog.brand.review", "Review brand requests."),
+    _permission("catalog.taxonomy.request", "Request a catalog taxonomy change."),
     _permission("catalog.product.write", "Manage catalog products."),
     _permission("order.cancel", "Cancel orders."),
     _permission("refund.approve", "Approve refunds."),
@@ -110,6 +114,8 @@ ROLE_PERMISSIONS = {
             "vendor.application.review",
             "vendor.application.approve",
             "vendor.payout.verify",
+            "catalog.category.enable",
+            "catalog.brand.review",
         }
     ),
     "MODERATOR_SUPPORT": frozenset(),
@@ -119,6 +125,7 @@ ROLE_PERMISSIONS = {
             "vendor.staff.revoke",
             "vendor.store.write",
             "vendor.warehouse.write",
+            "catalog.taxonomy.request",
         }
     ),
     "VENDOR_STAFF": frozenset(),
