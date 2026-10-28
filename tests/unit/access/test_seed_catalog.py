@@ -31,6 +31,9 @@ EXPECTED_PERMISSIONS = {
     "vendor.application.approve",
     "vendor.staff.invite",
     "vendor.staff.revoke",
+    "vendor.store.write",
+    "vendor.warehouse.write",
+    "vendor.payout.verify",
     "catalog.product.write",
     "order.cancel",
     "refund.approve",
@@ -87,11 +90,14 @@ def test_country_admin_mappings_are_explicit_and_bounded() -> None:
     assert role_permission_codes("COUNTRY_OPERATIONS") == {
         "vendor.application.review",
         "vendor.application.approve",
+        "vendor.payout.verify",
     }
     assert role_permission_codes("MODERATOR_SUPPORT") == set()
     assert role_permission_codes("VENDOR_OWNER") == {
         "vendor.staff.invite",
         "vendor.staff.revoke",
+        "vendor.store.write",
+        "vendor.warehouse.write",
     }
     assert role_permission_codes("VENDOR_STAFF") == set()
     assert "vendor.application.approve" not in role_permission_codes("COUNTRY_ADMIN")

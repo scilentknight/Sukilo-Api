@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     AUTH_COOKIE_SAMESITE: str = "lax"
     AUTH_COOKIE_NAME: str = "sukilo_refresh"
     AUTH_CSRF_COOKIE_NAME: str = "sukilo_csrf"
+    PAYOUT_ENCRYPTION_KEY: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

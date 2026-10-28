@@ -54,3 +54,18 @@ class DocumentType(StrEnum):
     OWNER_ID = "OWNER_ID"
     BANK = "BANK"
     BRAND_AUTH = "BRAND_AUTH"
+
+
+class AccountType(StrEnum):
+    """Represent one payout destination kind."""
+
+    BANK = "BANK"
+    WALLET = "WALLET"
+
+
+class StorefrontStatus(StrEnum):
+    """Represent a store or warehouse lifecycle."""
+
+    DRAFT = "DRAFT"
+    ACTIVE = "ACTIVE"
+    SUSPENDED = "SUSPENDED"

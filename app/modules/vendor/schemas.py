@@ -3,11 +3,13 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.vendor.types import (
+    AccountType,
     DocumentType,
     OnboardingStatus,
+    StorefrontStatus,
     VendorStatus,
     VendorType,
     VerificationStatus,
@@ -106,3 +108,96 @@ class MemberRevokeRequest(BaseModel):
 
     country_code: str = Field(min_length=2, max_length=2)
     reason: str = Field(min_length=1, max_length=255)
+
+
+class StoreUpsertRequest(BaseModel):
+    """Describe one storefront and one translation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vendor_id: UUID
+    country_code: str = Field(min_length=2, max_length=2)
+    slug: str = Field(min_length=1, max_length=160)
+    locale_code: str = Field(min_length=2, max_length=16)
+    name: str = Field(min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=4000)
+    seo_title: str | None = Field(default=None, max_length=160)
+    seo_description: str | None = Field(default=None, max_length=320)
+
+
+class StoreCountryRequest(BaseModel):
+    """Identify the store to activate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vendor_id: UUID
+    country_code: str = Field(min_length=2, max_length=2)
+
+
+class StoreResponse(BaseModel):
+    """Expose store copy and selling flags."""
+
+    store_id: UUID
+    vendor_id: UUID
+    country_id: UUID
+    slug: str
+    status: StorefrontStatus
+    locale_code: str
+    name: str
+    selling_enabled: bool
+    payout_enabled: bool
+
+
+class PayoutAccountRequest(BaseModel):
+    """Describe a new payout destination."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vendor_id: UUID
+    country_code: str = Field(min_length=2, max_length=2)
+    account_type: AccountType
+    currency_code: str = Field(min_length=3, max_length=3)
+    account_holder_name: str = Field(min_length=1, max_length=200)
+    account_number: str = Field(min_length=4, max_length=64)
+    bank_name: str | None = Field(default=None, max_length=160)
+    is_default: bool = True
+
+
+class PayoutAccountResponse(BaseModel):
+    """Expose a payout destination without the account secret."""
+
+    vendor_payout_account_id: UUID
+    currency_code: str
+    account_number_masked: str
+    is_default: bool
+    verification_status: VerificationStatus
+
+
+class WarehouseCreateRequest(BaseModel):
+    """Describe a seller warehouse."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vendor_id: UUID
+    country_code: str = Field(min_length=2, max_length=2)
+    code: str = Field(min_length=1, max_length=40)
+    address_line_1: str = Field(min_length=1, max_length=200)
+    city_text: str = Field(min_length=1, max_length=120)
+    postal_code: str | None = Field(default=None, max_length=20)
+    contact_name: str = Field(min_length=1, max_length=160)
+    contact_phone: str = Field(min_length=1, max_length=32)
+    fulfillment_enabled: bool = False
+    pickup_enabled: bool = False
+    status: StorefrontStatus = StorefrontStatus.DRAFT
+
+
+class WarehouseResponse(BaseModel):
+    """Expose one seller warehouse."""
+
+    warehouse_id: UUID
+    vendor_id: UUID
+    country_id: UUID
+    code: str
+    status: StorefrontStatus
+    fulfillment_enabled: bool
+

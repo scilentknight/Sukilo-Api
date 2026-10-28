@@ -2,10 +2,12 @@
 
 from typing import Annotated
 
+from cryptography.fernet import Fernet
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.auth_context import AuthContext
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.transactions import DatabaseTransaction
 from app.modules.access.application import AccessApplicationBuilder
@@ -17,11 +19,13 @@ from app.modules.access.vendor_grants import (
 from app.modules.identity.grants import AuthGrantError
 from app.modules.identity.repository import AccountRepository
 from app.modules.identity.types import GrantPurpose
+from app.modules.vendor.account_cipher import FernetAccountCipher
 from app.modules.vendor.applications import VendorApplicationService
 from app.modules.vendor.errors import VendorServiceError
 from app.modules.vendor.invitations import VendorInvitationService
 from app.modules.vendor.repository import VendorRepository
 from app.modules.vendor.reviews import VendorReviewService
+from app.modules.vendor.storefront import VendorStorefrontService
 from app.ports.document_storage import MemoryDocumentStorage
 
 
@@ -33,7 +37,10 @@ def commit_vendor(db: Session, action):
         return result
     except VendorServiceError as exc:
         db.rollback()
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        detail: str | dict[str, str] = str(exc)
+        if exc.code is not None:
+            detail = {"code": exc.code, "message": str(exc)}
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
     except AuthGrantError as exc:
         db.rollback()
         raise HTTPException(status_code=401, detail="Step-up grant is unavailable.") from exc
@@ -76,7 +83,6 @@ def get_review_service(
             action_class=action_class,
             subject_hash=None,
         )
-
     return VendorReviewService(
         VendorRepository(db),
         AccountRepository(db),
@@ -106,6 +112,23 @@ def get_invitation_service(
     )
 
 
+def get_storefront_service(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+) -> VendorStorefrontService:
+    """Build the storefront service for one request."""
+    builder = _builder(request)
+    return VendorStorefrontService(
+        VendorRepository(db),
+        builder.countries,
+        AssignmentVendorAuthorizer(db, builder.clock),
+        _cipher(request),
+        builder.audit_writer,
+        DatabaseTransaction(db),
+        builder.clock,
+    )
+
+
 def _builder(request: Request) -> AccessApplicationBuilder:
     """Return the process access builder that owns shared adapters."""
     builder = getattr(request.app.state, "access_application_factory", None)
@@ -121,3 +144,18 @@ def _storage(request: Request) -> MemoryDocumentStorage:
         storage = MemoryDocumentStorage()
         request.app.state.vendor_document_storage = storage
     return storage
+
+
+def _cipher(request: Request) -> FernetAccountCipher:
+    """Reuse one payout cipher for the application lifetime."""
+    cipher = getattr(request.app.state, "vendor_account_cipher", None)
+    if isinstance(cipher, FernetAccountCipher):
+        return cipher
+    configured = (settings.PAYOUT_ENCRYPTION_KEY or "").strip()
+    if not configured:
+        if settings.APP_ENV.casefold() == "production":
+            raise HTTPException(status_code=503, detail="Vendor services are unavailable.")
+        configured = Fernet.generate_key().decode("ascii")
+    cipher = FernetAccountCipher(configured)
+    request.app.state.vendor_account_cipher = cipher
+    return cipher

@@ -70,6 +70,9 @@ PERMISSIONS = (
     ),
     _permission("vendor.staff.invite", "Invite vendor staff."),
     _permission("vendor.staff.revoke", "Revoke vendor staff."),
+    _permission("vendor.store.write", "Update the vendor storefront."),
+    _permission("vendor.warehouse.write", "Manage vendor warehouses."),
+    _permission("vendor.payout.verify", "Verify a vendor payout account."),
     _permission("catalog.product.write", "Manage catalog products."),
     _permission("order.cancel", "Cancel orders."),
     _permission("refund.approve", "Approve refunds."),
@@ -106,6 +109,7 @@ ROLE_PERMISSIONS = {
         {
             "vendor.application.review",
             "vendor.application.approve",
+            "vendor.payout.verify",
         }
     ),
     "MODERATOR_SUPPORT": frozenset(),
@@ -113,6 +117,8 @@ ROLE_PERMISSIONS = {
         {
             "vendor.staff.invite",
             "vendor.staff.revoke",
+            "vendor.store.write",
+            "vendor.warehouse.write",
         }
     ),
     "VENDOR_STAFF": frozenset(),

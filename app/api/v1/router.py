@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     vendor_applications,
     vendor_reviews,
     vendor_staff,
+    vendor_store,
 )
 
 api_router = APIRouter()
@@ -24,3 +25,4 @@ api_router.include_router(vectors.router)
 api_router.include_router(vendor_applications.router)
 api_router.include_router(vendor_reviews.router)
 api_router.include_router(vendor_staff.router)
+api_router.include_router(vendor_store.router)

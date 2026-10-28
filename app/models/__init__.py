@@ -20,11 +20,15 @@ from app.modules.identity.models import (
     UserSession,
 )
 from app.modules.vendor.models import (
+    Store,
+    StoreTranslation,
     Vendor,
     VendorCountry,
     VendorDocument,
     VendorInvitation,
     VendorMember,
+    VendorPayoutAccount,
+    Warehouse,
 )
 from app.models.product import Product, ProductImage
 
@@ -40,6 +44,8 @@ __all__ = [
     "ProductImage",
     "Role",
     "RolePermission",
+    "Store",
+    "StoreTranslation",
     "UserAccount",
     "UserPreference",
     "UserRoleAssignment",
@@ -49,4 +55,6 @@ __all__ = [
     "VendorDocument",
     "VendorInvitation",
     "VendorMember",
+    "VendorPayoutAccount",
+    "Warehouse",
 ]

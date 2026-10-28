@@ -160,6 +160,26 @@ def test_vendor_migrations_follow_identity_head() -> None:
             "20261028_0025",
             "20261028_0024",
         ),
+        "20261028_0026_create_vendor_payout_account.py": (
+            "20261028_0026",
+            "20261028_0025",
+        ),
+        "20261028_0027_create_vendor_store.py": (
+            "20261028_0027",
+            "20261028_0026",
+        ),
+        "20261028_0028_create_vendor_store_translation.py": (
+            "20261028_0028",
+            "20261028_0027",
+        ),
+        "20261028_0029_create_vendor_warehouse.py": (
+            "20261028_0029",
+            "20261028_0028",
+        ),
+        "20261028_0030_seed_store_permissions.py": (
+            "20261028_0030",
+            "20261028_0029",
+        ),
     }
     for filename, revisions in expected.items():
         migration = _load_migration(filename)

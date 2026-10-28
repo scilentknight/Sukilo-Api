@@ -46,6 +46,14 @@ class CountryReader(Protocol):
         """Return whether a currency is enabled in a country."""
         ...
 
+    def default_currency_code(self, country_id: UUID) -> str:
+        """Return the settlement currency for a country."""
+        ...
+
+    def default_locale_code(self, country_id: UUID) -> str:
+        """Return the default storefront locale for a country."""
+        ...
+
     def geography_belongs_to_country(
         self,
         country_id: UUID,

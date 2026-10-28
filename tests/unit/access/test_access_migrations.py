@@ -52,6 +52,8 @@ def test_seed_migration_matches_runtime_catalog_exactly() -> None:
     """Keep the original seed stable and the vendor seed aligned with the catalog."""
     base = _load_migration("20261012_0013_seed_iam_access_catalog.py")
     added = _load_migration("20261028_0025_seed_vendor_access.py")
+    store = _load_migration("20261028_0030_seed_store_permissions.py")
+    added_permissions = set(added.NEW_PERMISSION_CODES) | set(store.NEW_PERMISSION_CODES)
     base_roles = {
         code: (UUID(role_id), name, scope_type)
         for role_id, code, name, scope_type in base.ROLES
@@ -72,14 +74,19 @@ def test_seed_migration_matches_runtime_catalog_exactly() -> None:
     assert set(added.NEW_ROLE_CODES) <= set(runtime_roles)
     for code, value in base_roles.items():
         assert runtime_roles[code] == value
-    assert set(base_permissions) == set(runtime_permissions) - set(added.NEW_PERMISSION_CODES)
+    assert set(base_permissions) == set(runtime_permissions) - added_permissions
     for code, value in base_permissions.items():
         assert runtime_permissions[code] == value
     assert set(base.ROLE_PERMISSIONS["COUNTRY_OPERATIONS"]) == set()
-    assert ROLE_PERMISSIONS["COUNTRY_OPERATIONS"] == frozenset(added.NEW_PERMISSION_CODES) & frozenset(
-        {"vendor.application.review", "vendor.application.approve"}
+    assert ROLE_PERMISSIONS["COUNTRY_OPERATIONS"] == frozenset(
+        {
+            "vendor.application.review",
+            "vendor.application.approve",
+            "vendor.payout.verify",
+        }
     )
     assert "vendor.application.approve" not in base.ROLE_PERMISSIONS["COUNTRY_ADMIN"]
+    assert "vendor.payout.verify" not in ROLE_PERMISSIONS["VENDOR_OWNER"]
     assert set(base.ROLE_PERMISSIONS["SUPER_ADMIN"]) == (
-        set(ROLE_PERMISSIONS["SUPER_ADMIN"]) - set(added.NEW_PERMISSION_CODES)
+        set(ROLE_PERMISSIONS["SUPER_ADMIN"]) - added_permissions
     )

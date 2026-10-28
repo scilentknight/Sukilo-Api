@@ -30,6 +30,32 @@ from app.ports.country import AddressPolicy, CountryReader, CountryReference
 
 logger = logging.getLogger(__name__)
 
+_MARKET_DEFAULTS = {
+    "NP": ("NPR", "ne"),
+    "AE": ("AED", "en"),
+    "VN": ("VND", "vi"),
+    "KH": ("KHR", "km"),
+}
+
+
+def _market_default(code: str, index: int) -> str:
+    """Return one configured market default.
+
+    Args:
+        code: ISO alpha-2 country code.
+        index: Position of the currency or locale in the market pair.
+
+    Returns:
+        Configured currency or locale code.
+
+    Raises:
+        KeyError: If the country has no configured default.
+    """
+    try:
+        return _MARKET_DEFAULTS[code][index]
+    except KeyError as exc:
+        raise KeyError("Country default is unavailable.") from exc
+
 
 class EnvSecretResolver:
     """Resolve env:, file:, or literal secret references."""
@@ -196,6 +222,34 @@ class DevelopmentCountryReader:
         """
         del country_id, currency_code
         return True
+
+    def default_currency_code(self, country_id: UUID) -> str:
+        """Return the settlement currency for a development market.
+
+        Args:
+            country_id: Stable country identifier.
+
+        Returns:
+            ISO currency code.
+
+        Raises:
+            KeyError: If the country has no configured currency.
+        """
+        return _market_default(self.resolve_country_id(country_id).code, 0)
+
+    def default_locale_code(self, country_id: UUID) -> str:
+        """Return the default storefront locale for a development market.
+
+        Args:
+            country_id: Stable country identifier.
+
+        Returns:
+            Locale code.
+
+        Raises:
+            KeyError: If the country has no configured locale.
+        """
+        return _market_default(self.resolve_country_id(country_id).code, 1)
 
     def geography_belongs_to_country(
         self,
