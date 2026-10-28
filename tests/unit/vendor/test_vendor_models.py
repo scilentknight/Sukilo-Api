@@ -148,6 +148,18 @@ def test_vendor_migrations_follow_identity_head() -> None:
             "20261028_0022",
             "20261028_0021",
         ),
+        "20261028_0023_create_vendor_document.py": (
+            "20261028_0023",
+            "20261028_0022",
+        ),
+        "20261028_0024_create_vendor_invitation.py": (
+            "20261028_0024",
+            "20261028_0023",
+        ),
+        "20261028_0025_seed_vendor_access.py": (
+            "20261028_0025",
+            "20261028_0024",
+        ),
     }
     for filename, revisions in expected.items():
         migration = _load_migration(filename)

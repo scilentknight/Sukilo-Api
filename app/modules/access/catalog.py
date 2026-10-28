@@ -61,6 +61,15 @@ PERMISSIONS = (
     _permission("country.settings.read", "Read country settings."),
     _permission("country.settings.write", "Update country settings."),
     _permission("vendor.approve", "Approve vendors."),
+    _permission("vendor.application.read", "Read a seller country application."),
+    _permission("vendor.application.submit", "Submit a seller country application."),
+    _permission("vendor.application.review", "Review seller country applications."),
+    _permission(
+        "vendor.application.approve",
+        "Approve or reject a seller country application.",
+    ),
+    _permission("vendor.staff.invite", "Invite vendor staff."),
+    _permission("vendor.staff.revoke", "Revoke vendor staff."),
     _permission("catalog.product.write", "Manage catalog products."),
     _permission("order.cancel", "Cancel orders."),
     _permission("refund.approve", "Approve refunds."),
@@ -73,6 +82,8 @@ ROLES = (
     _role("COUNTRY_FINANCE", "Country Finance", ScopeType.COUNTRY),
     _role("COUNTRY_OPERATIONS", "Country Operations", ScopeType.COUNTRY),
     _role("MODERATOR_SUPPORT", "Moderator Support", ScopeType.COUNTRY),
+    _role("VENDOR_OWNER", "Vendor Owner", ScopeType.VENDOR),
+    _role("VENDOR_STAFF", "Vendor Staff", ScopeType.VENDOR),
 )
 
 _IAM_ADMIN_PERMISSIONS = frozenset(
@@ -91,8 +102,20 @@ ROLE_PERMISSIONS = {
     "SUPER_ADMIN": frozenset(entry.code for entry in PERMISSIONS),
     "COUNTRY_ADMIN": _IAM_ADMIN_PERMISSIONS,
     "COUNTRY_FINANCE": frozenset(),
-    "COUNTRY_OPERATIONS": frozenset(),
+    "COUNTRY_OPERATIONS": frozenset(
+        {
+            "vendor.application.review",
+            "vendor.application.approve",
+        }
+    ),
     "MODERATOR_SUPPORT": frozenset(),
+    "VENDOR_OWNER": frozenset(
+        {
+            "vendor.staff.invite",
+            "vendor.staff.revoke",
+        }
+    ),
+    "VENDOR_STAFF": frozenset(),
 }
 
 

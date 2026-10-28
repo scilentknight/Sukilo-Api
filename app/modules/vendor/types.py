@@ -44,3 +44,13 @@ class MemberStatus(StrEnum):
     INVITED = "INVITED"
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
+
+
+class DocumentType(StrEnum):
+    """Represent one seller application file type."""
+
+    REGISTRATION = "REGISTRATION"
+    TAX = "TAX"
+    OWNER_ID = "OWNER_ID"
+    BANK = "BANK"
+    BRAND_AUTH = "BRAND_AUTH"

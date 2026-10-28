@@ -49,24 +49,37 @@ def test_access_migrations_form_linear_0009_through_0013_chain() -> None:
 
 
 def test_seed_migration_matches_runtime_catalog_exactly() -> None:
-    """Keep deterministic seed IDs, metadata, and mappings synchronized."""
-    migration = _load_migration("20261012_0013_seed_iam_access_catalog.py")
-    migration_roles = {
+    """Keep the original seed stable and the vendor seed aligned with the catalog."""
+    base = _load_migration("20261012_0013_seed_iam_access_catalog.py")
+    added = _load_migration("20261028_0025_seed_vendor_access.py")
+    base_roles = {
         code: (UUID(role_id), name, scope_type)
-        for role_id, code, name, scope_type in migration.ROLES
+        for role_id, code, name, scope_type in base.ROLES
     }
     runtime_roles = {
         role.code: (role.role_id, role.name, role.scope_type.value)
         for role in ROLES
     }
-    migration_permissions = {
+    base_permissions = {
         code: (UUID(permission_id), description)
-        for permission_id, code, description in migration.PERMISSIONS
+        for permission_id, code, description in base.PERMISSIONS
     }
     runtime_permissions = {
         permission.code: (permission.permission_id, permission.description)
         for permission in PERMISSIONS
     }
-    assert migration_roles == runtime_roles
-    assert migration_permissions == runtime_permissions
-    assert migration.ROLE_PERMISSIONS == ROLE_PERMISSIONS
+    assert set(base_roles) == set(runtime_roles) - set(added.NEW_ROLE_CODES)
+    assert set(added.NEW_ROLE_CODES) <= set(runtime_roles)
+    for code, value in base_roles.items():
+        assert runtime_roles[code] == value
+    assert set(base_permissions) == set(runtime_permissions) - set(added.NEW_PERMISSION_CODES)
+    for code, value in base_permissions.items():
+        assert runtime_permissions[code] == value
+    assert set(base.ROLE_PERMISSIONS["COUNTRY_OPERATIONS"]) == set()
+    assert ROLE_PERMISSIONS["COUNTRY_OPERATIONS"] == frozenset(added.NEW_PERMISSION_CODES) & frozenset(
+        {"vendor.application.review", "vendor.application.approve"}
+    )
+    assert "vendor.application.approve" not in base.ROLE_PERMISSIONS["COUNTRY_ADMIN"]
+    assert set(base.ROLE_PERMISSIONS["SUPER_ADMIN"]) == (
+        set(ROLE_PERMISSIONS["SUPER_ADMIN"]) - set(added.NEW_PERMISSION_CODES)
+    )

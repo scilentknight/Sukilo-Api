@@ -25,6 +25,12 @@ EXPECTED_PERMISSIONS = {
     "country.settings.read",
     "country.settings.write",
     "vendor.approve",
+    "vendor.application.read",
+    "vendor.application.submit",
+    "vendor.application.review",
+    "vendor.application.approve",
+    "vendor.staff.invite",
+    "vendor.staff.revoke",
     "catalog.product.write",
     "order.cancel",
     "refund.approve",
@@ -54,6 +60,8 @@ def test_initial_roles_have_expected_scopes() -> None:
         "COUNTRY_FINANCE": ScopeType.COUNTRY,
         "COUNTRY_OPERATIONS": ScopeType.COUNTRY,
         "MODERATOR_SUPPORT": ScopeType.COUNTRY,
+        "VENDOR_OWNER": ScopeType.VENDOR,
+        "VENDOR_STAFF": ScopeType.VENDOR,
     }
     assert len({entry.role_id for entry in ROLES}) == len(ROLES)
 
@@ -76,5 +84,14 @@ def test_country_admin_mappings_are_explicit_and_bounded() -> None:
     }
     assert role_permission_codes("COUNTRY_ADMIN") == implemented
     assert role_permission_codes("COUNTRY_FINANCE") == set()
-    assert role_permission_codes("COUNTRY_OPERATIONS") == set()
+    assert role_permission_codes("COUNTRY_OPERATIONS") == {
+        "vendor.application.review",
+        "vendor.application.approve",
+    }
     assert role_permission_codes("MODERATOR_SUPPORT") == set()
+    assert role_permission_codes("VENDOR_OWNER") == {
+        "vendor.staff.invite",
+        "vendor.staff.revoke",
+    }
+    assert role_permission_codes("VENDOR_STAFF") == set()
+    assert "vendor.application.approve" not in role_permission_codes("COUNTRY_ADMIN")

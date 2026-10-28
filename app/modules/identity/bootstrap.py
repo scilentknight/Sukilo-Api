@@ -168,6 +168,7 @@ class DevelopmentCountryReader:
             "CUSTOMER_ADDRESS",
             "CUSTOMER_IDENTIFIER_CHANGE",
             "iam.assignment.manage",
+            "SELLER_ONBOARDING",
         }
 
     def is_locale_enabled(self, country_id: UUID, locale_code: str) -> bool:
