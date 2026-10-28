@@ -73,6 +73,11 @@ class VendorDocument(Base):
     )
     document_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
     storage_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    media_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("catalog.media_asset.media_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     issued_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

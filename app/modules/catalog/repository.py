@@ -15,8 +15,24 @@ from app.modules.catalog.models import (
     CategoryChangeRequest,
     CategoryCountry,
     CategoryTranslation,
+    MediaAsset,
+    OfferCountry,
+    CatalogProduct,
+    ProductAttributeValue,
+    ProductCountry,
+    ProductMedia,
+    ProductTranslation,
+    SellerOffer,
+    Sku,
+    SkuAttributeValue,
 )
-from app.modules.catalog.types import RecordStatus
+from app.modules.catalog.types import (
+    ModerationStatus,
+    OfferStatus,
+    ProductStatus,
+    PublicationStatus,
+    RecordStatus,
+)
 
 
 class CatalogRepository:
@@ -319,3 +335,200 @@ class CatalogRepository:
             self.db.add(model(**{id_name: record_id, "country_id": country_id, "enabled": True}))
             return
         row.enabled = True
+
+    def is_category_enabled(self, category_id: UUID, country_id: UUID) -> bool:
+        """Return whether an active category is enabled in one country."""
+        category = self.get_category(category_id)
+        if category is None or category.status is not RecordStatus.ACTIVE:
+            return False
+        row = self.db.scalar(
+            select(CategoryCountry).where(
+                CategoryCountry.category_id == category_id,
+                CategoryCountry.country_id == country_id,
+                CategoryCountry.enabled.is_(True),
+            )
+        )
+        return row is not None
+
+    def is_brand_enabled(self, brand_id: UUID, country_id: UUID) -> bool:
+        """Return whether an active brand is enabled in one country."""
+        brand = self.get_brand(brand_id)
+        if brand is None or brand.status is not RecordStatus.ACTIVE:
+            return False
+        row = self.db.scalar(
+            select(BrandCountry).where(
+                BrandCountry.brand_id == brand_id,
+                BrandCountry.country_id == country_id,
+                BrandCountry.enabled.is_(True),
+            )
+        )
+        return row is not None
+
+    def list_required_attribute_ids(self, category_id: UUID) -> list[UUID]:
+        """Return attribute ids required by one category."""
+        statement = select(CategoryAttribute.attribute_id).where(
+            CategoryAttribute.category_id == category_id,
+            CategoryAttribute.required.is_(True),
+        )
+        return list(self.db.scalars(statement))
+
+    def list_product_attribute_ids(self, product_id: UUID) -> list[UUID]:
+        """Return attribute ids already stored on one product."""
+        statement = select(ProductAttributeValue.attribute_id).where(
+            ProductAttributeValue.product_id == product_id
+        )
+        return list(self.db.scalars(statement))
+
+    def add_product(self, product: CatalogProduct) -> None:
+        """Stage one shared product."""
+        self.db.add(product)
+        self.db.flush()
+
+    def add_product_translation(self, translation: ProductTranslation) -> None:
+        """Stage one product translation."""
+        self.db.add(translation)
+
+    def add_product_attribute(self, value: ProductAttributeValue) -> None:
+        """Stage one product attribute value."""
+        self.db.add(value)
+
+    def get_product(self, product_id: UUID, *, for_update: bool = False) -> CatalogProduct | None:
+        """Return one shared product."""
+        statement = select(CatalogProduct).where(CatalogProduct.product_id == product_id)
+        if for_update:
+            statement = statement.with_for_update()
+        return self.db.scalar(statement)
+
+    def get_product_country(
+        self,
+        product_id: UUID,
+        country_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> ProductCountry | None:
+        """Return moderation for one product in one country."""
+        statement = select(ProductCountry).where(
+            ProductCountry.product_id == product_id,
+            ProductCountry.country_id == country_id,
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return self.db.scalar(statement)
+
+    def set_product_moderation(
+        self,
+        product_id: UUID,
+        country_id: UUID,
+        status: ModerationStatus,
+    ) -> None:
+        """Insert or update moderation for one country only."""
+        row = self.get_product_country(product_id, country_id)
+        if row is None:
+            self.db.add(
+                ProductCountry(
+                    product_id=product_id,
+                    country_id=country_id,
+                    moderation_status=status,
+                )
+            )
+            return
+        row.moderation_status = status
+
+    def add_sku(self, sku: Sku) -> None:
+        """Stage one SKU."""
+        self.db.add(sku)
+        self.db.flush()
+
+    def add_sku_attribute(self, value: SkuAttributeValue) -> None:
+        """Stage one SKU attribute value."""
+        self.db.add(value)
+
+    def get_sku(self, sku_id: UUID) -> Sku | None:
+        """Return one SKU."""
+        return self.db.scalar(select(Sku).where(Sku.sku_id == sku_id))
+
+    def add_media(self, media: MediaAsset) -> None:
+        """Stage one media asset."""
+        self.db.add(media)
+        self.db.flush()
+
+    def clear_primary_media(self, product_id: UUID) -> None:
+        """Clear the primary flag on every media row for one product."""
+        rows = self.db.scalars(
+            select(ProductMedia).where(ProductMedia.product_id == product_id)
+        )
+        for row in rows:
+            row.is_primary = False
+
+    def add_product_media(self, link: ProductMedia) -> None:
+        """Stage one product media link."""
+        self.db.add(link)
+
+    def add_offer(self, offer: SellerOffer) -> None:
+        """Stage one seller offer."""
+        self.db.add(offer)
+        self.db.flush()
+
+    def add_offer_country(self, row: OfferCountry) -> None:
+        """Stage one offer country price."""
+        self.db.add(row)
+
+    def get_offer(self, offer_id: UUID, *, for_update: bool = False) -> SellerOffer | None:
+        """Return one seller offer."""
+        statement = select(SellerOffer).where(SellerOffer.offer_id == offer_id)
+        if for_update:
+            statement = statement.with_for_update()
+        return self.db.scalar(statement)
+
+    def get_offer_country(
+        self,
+        offer_id: UUID,
+        country_id: UUID,
+        *,
+        for_update: bool = False,
+    ) -> OfferCountry | None:
+        """Return one offer publication row."""
+        statement = select(OfferCountry).where(
+            OfferCountry.offer_id == offer_id,
+            OfferCountry.country_id == country_id,
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return self.db.scalar(statement)
+
+    def get_product_name(self, product_id: UUID, locale_code: str) -> str | None:
+        """Return one product translation name."""
+        row = self.db.scalar(
+            select(ProductTranslation).where(
+                ProductTranslation.product_id == product_id,
+                ProductTranslation.locale_code == locale_code,
+            )
+        )
+        if row is None:
+            return None
+        return row.name
+
+    def list_published_offers(
+        self,
+        country_id: UUID,
+    ) -> list[tuple[SellerOffer, OfferCountry, Sku, CatalogProduct, ProductCountry]]:
+        """Return published offer rows that still pass country publication checks."""
+        statement = (
+            select(SellerOffer, OfferCountry, Sku, CatalogProduct, ProductCountry)
+            .join(OfferCountry, OfferCountry.offer_id == SellerOffer.offer_id)
+            .join(Sku, Sku.sku_id == SellerOffer.sku_id)
+            .join(CatalogProduct, CatalogProduct.product_id == Sku.product_id)
+            .join(
+                ProductCountry,
+                (ProductCountry.product_id == CatalogProduct.product_id)
+                & (ProductCountry.country_id == country_id),
+            )
+            .where(
+                OfferCountry.country_id == country_id,
+                OfferCountry.publication_status == PublicationStatus.PUBLISHED,
+                SellerOffer.status == OfferStatus.ACTIVE,
+                ProductCountry.moderation_status == ModerationStatus.APPROVED,
+                CatalogProduct.status != ProductStatus.RETIRED,
+            )
+        )
+        return list(self.db.execute(statement).all())

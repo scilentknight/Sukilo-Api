@@ -200,6 +200,30 @@ def test_vendor_migrations_follow_identity_head() -> None:
             "20261028_0035",
             "20261028_0034",
         ),
+        "20261028_0036_create_catalog_product.py": (
+            "20261028_0036",
+            "20261028_0035",
+        ),
+        "20261028_0037_create_catalog_sku.py": (
+            "20261028_0037",
+            "20261028_0036",
+        ),
+        "20261028_0038_create_catalog_media.py": (
+            "20261028_0038",
+            "20261028_0037",
+        ),
+        "20261028_0039_create_catalog_offer.py": (
+            "20261028_0039",
+            "20261028_0038",
+        ),
+        "20261028_0040_link_vendor_media.py": (
+            "20261028_0040",
+            "20261028_0039",
+        ),
+        "20261028_0041_seed_offer_permissions.py": (
+            "20261028_0041",
+            "20261028_0040",
+        ),
     }
     for filename, revisions in expected.items():
         migration = _load_migration(filename)

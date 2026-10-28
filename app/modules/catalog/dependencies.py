@@ -11,12 +11,15 @@ from app.modules.access.application import AccessApplicationBuilder
 from app.modules.access.dependencies import get_access_application
 from app.modules.access.vendor_grants import AssignmentVendorAuthorizer
 from app.modules.catalog.errors import CatalogServiceError
+from app.modules.catalog.offers import CatalogOfferService
 from app.modules.catalog.repository import CatalogRepository
 from app.modules.catalog.service import CatalogTaxonomyService
 from app.modules.identity.grants import AuthGrantError
 from app.modules.identity.types import GrantPurpose
 from app.modules.vendor.repository import VendorRepository
 from app.modules.vendor.types import OnboardingStatus
+from app.ports.document_storage import MemoryDocumentStorage
+from app.ports.vendor_scope import SessionVendorScopeReader
 
 
 def commit_catalog(db: Session, action):
@@ -79,6 +82,39 @@ def get_catalog_service(
         builder.countries,
         AssignmentVendorAuthorizer(db, builder.clock),
         VendorApprovedSellerLookup(db),
+        consume,
+    )
+
+
+def get_offer_service(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    access: Annotated[object, Depends(get_access_application)],
+) -> CatalogOfferService:
+    """Build the offer service for one request."""
+    builder = _builder(request)
+    grants = access.assignments.grants
+    storage = getattr(request.app.state, "catalog_media_storage", None)
+    if not isinstance(storage, MemoryDocumentStorage):
+        storage = MemoryDocumentStorage()
+        request.app.state.catalog_media_storage = storage
+    def consume(token: str, actor: AuthContext, action_class: str) -> None:
+        """Consume a session-bound step-up grant."""
+        grants.consume(
+            token,
+            user_id=actor.user_id,
+            session_id=actor.session_id,
+            purpose=GrantPurpose.STEP_UP,
+            action_class=action_class,
+            subject_hash=None,
+        )
+    return CatalogOfferService(
+        CatalogRepository(db),
+        builder.countries,
+        AssignmentVendorAuthorizer(db, builder.clock),
+        VendorApprovedSellerLookup(db),
+        SessionVendorScopeReader(db),
+        storage,
         consume,
     )
 

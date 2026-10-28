@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     vendor_reviews,
     vendor_staff,
     vendor_store,
+    catalog_offers,
     catalog_taxonomy,
 )
 
@@ -24,6 +25,7 @@ api_router.include_router(products.router)
 api_router.include_router(search.router)
 api_router.include_router(vectors.router)
 api_router.include_router(catalog_taxonomy.router)
+api_router.include_router(catalog_offers.router)
 api_router.include_router(vendor_applications.router)
 api_router.include_router(vendor_reviews.router)
 api_router.include_router(vendor_staff.router)

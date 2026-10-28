@@ -98,10 +98,12 @@ class Store(Base):
     )
     logo_media_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
+        ForeignKey("catalog.media_asset.media_id", ondelete="RESTRICT"),
         nullable=True,
     )
     banner_media_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
+        ForeignKey("catalog.media_asset.media_id", ondelete="RESTRICT"),
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(

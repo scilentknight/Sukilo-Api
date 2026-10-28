@@ -78,6 +78,8 @@ PERMISSIONS = (
     _permission("catalog.brand.review", "Review brand requests."),
     _permission("catalog.taxonomy.request", "Request a catalog taxonomy change."),
     _permission("catalog.product.write", "Manage catalog products."),
+    _permission("catalog.product.moderate", "Moderate a product in one country."),
+    _permission("catalog.offer.publish", "Publish a seller offer."),
     _permission("order.cancel", "Cancel orders."),
     _permission("refund.approve", "Approve refunds."),
     _permission("finance.payout.release", "Release finance payouts."),
@@ -116,6 +118,7 @@ ROLE_PERMISSIONS = {
             "vendor.payout.verify",
             "catalog.category.enable",
             "catalog.brand.review",
+            "catalog.product.moderate",
         }
     ),
     "MODERATOR_SUPPORT": frozenset(),
@@ -126,6 +129,8 @@ ROLE_PERMISSIONS = {
             "vendor.store.write",
             "vendor.warehouse.write",
             "catalog.taxonomy.request",
+            "catalog.product.write",
+            "catalog.offer.publish",
         }
     ),
     "VENDOR_STAFF": frozenset(),

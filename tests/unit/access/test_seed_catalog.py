@@ -39,6 +39,8 @@ EXPECTED_PERMISSIONS = {
     "catalog.brand.review",
     "catalog.taxonomy.request",
     "catalog.product.write",
+    "catalog.product.moderate",
+    "catalog.offer.publish",
     "order.cancel",
     "refund.approve",
     "finance.payout.release",
@@ -97,6 +99,7 @@ def test_country_admin_mappings_are_explicit_and_bounded() -> None:
         "vendor.payout.verify",
         "catalog.category.enable",
         "catalog.brand.review",
+        "catalog.product.moderate",
     }
     assert role_permission_codes("MODERATOR_SUPPORT") == set()
     assert role_permission_codes("VENDOR_OWNER") == {
@@ -105,8 +108,11 @@ def test_country_admin_mappings_are_explicit_and_bounded() -> None:
         "vendor.store.write",
         "vendor.warehouse.write",
         "catalog.taxonomy.request",
+        "catalog.product.write",
+        "catalog.offer.publish",
     }
     assert role_permission_codes("VENDOR_STAFF") == set()
+    assert "catalog.offer.publish" not in role_permission_codes("VENDOR_STAFF")
     assert "vendor.application.approve" not in role_permission_codes("COUNTRY_ADMIN")
     assert "catalog.category.write" not in role_permission_codes("COUNTRY_OPERATIONS")
     assert "catalog.category.write" not in role_permission_codes("VENDOR_OWNER")
