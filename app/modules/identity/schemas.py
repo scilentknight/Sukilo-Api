@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.modules.identity.types import OtpPurpose
 
@@ -35,7 +35,12 @@ class OtpVerifyRequest(BaseModel):
     code: str = Field(pattern=r"^\d{6}$")
     action_class: str | None = Field(default=None, max_length=64)
 
+class OtpResendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
+    challenge_id: UUID
+    purpose: OtpPurpose
+    
 class ChallengeAcceptedResponse(BaseModel):
     """Return an opaque challenge and generic delivery status.
 

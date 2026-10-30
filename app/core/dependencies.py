@@ -13,19 +13,21 @@ from app.services.product_service import ProductService
 from app.services.vector_service import VectorService
 
 
-def get_embedding_service(request: Request) -> EmbeddingService:
+def get_embedding_service(request: Request) -> EmbeddingService | None:
     """Return the embedding service stored on application state.
 
     Args:
         request: Current HTTP request.
 
     Returns:
-        Loaded embedding service instance.
+        Loaded embedding service instance, or None if disabled.
 
     Raises:
-        HTTPException: If the vector stack was not initialized on startup.
+        HTTPException: If the vector stack was required but not initialized.
     """
     service = getattr(request.app.state, "embedding_service", None)
+    if service is None and not settings.ENABLE_VECTOR_STACK:
+        return None
     if service is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -34,19 +36,21 @@ def get_embedding_service(request: Request) -> EmbeddingService:
     return service
 
 
-def get_vector_service(request: Request) -> VectorService:
+def get_vector_service(request: Request) -> VectorService | None:
     """Return the vector service stored on application state.
 
     Args:
         request: Current HTTP request.
 
     Returns:
-        Connected vector service instance.
+        Connected vector service instance, or None if disabled.
 
     Raises:
-        HTTPException: If the vector stack was not initialized on startup.
+        HTTPException: If the vector stack was required but not initialized.
     """
     service = getattr(request.app.state, "vector_service", None)
+    if service is None and not settings.ENABLE_VECTOR_STACK:
+        return None
     if service is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

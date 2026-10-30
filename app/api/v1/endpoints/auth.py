@@ -31,6 +31,7 @@ from app.modules.identity.schemas import (
     LoginRequest,
     MessageResponse,
     OtpRequest,
+    OtpResendRequest,
     OtpVerifyRequest,
     OtpVerifyResponse,
     PasswordForgotRequest,
@@ -99,6 +100,16 @@ def register(
 ) -> ChallengeAcceptedResponse:
     """Register a pending global account and request verification."""
     clear_development_code()
+    
+    # DEBUG: Check incoming registration data
+    print("\n========== REGISTRATION REQUEST ==========")
+    print("Identifier:", payload.email)
+    print("Device ID:", payload.phone_e164)
+    print("Country Code:", payload.country_code)
+    print("Locale Code:", payload.locale_code)
+    print("Password Received:", bool(payload.password))
+    print("Password Length:", len(payload.password))
+    print("===================================\n")
     try:
         challenge_id = application.registration.register(**payload.model_dump())
         db.commit()
@@ -137,6 +148,13 @@ def request_otp(
     if payload.purpose != OtpPurpose.RESET:
         raise _request_error("This OTP purpose is not externally enabled.")
     clear_development_code()
+    # DEBUG: Check incoming OTP data
+    print("\n========== OTP REQUEST ==========")
+    print("Identifier:", payload.identifier)
+    print("Purpose:", payload.purpose)
+    print("Local Code:", payload.locale_code)
+    print("Country Code:", payload.country_code)
+    print("===================================\n")
     try:
         challenge_id = application.recovery.request(
             email=payload.identifier,
@@ -150,6 +168,53 @@ def request_otp(
         clear_development_code()
         raise _rate_limit_error(exc) from exc
 
+@router.post("/otp/resend",
+    response_model=ChallengeAcceptedResponse,
+    response_model_exclude_none=True,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def resend_registration_otp(
+    payload: OtpResendRequest,
+    db: Annotated[Session, Depends(get_db)],
+    application: Annotated[
+        IdentityApplication,
+        Depends(get_identity_application),
+    ],
+) -> ChallengeAcceptedResponse:
+    """Resend an OTP for a pending registration."""
+    clear_development_code()
+
+    if payload.purpose != OtpPurpose.REGISTER:
+        raise _request_error("This OTP purpose is unavailable.")
+
+    try:
+        challenge_id = application.registration.resend_registration_otp(
+            payload.challenge_id
+        )
+        db.commit()
+        return _accepted(challenge_id)
+
+    except RateLimitExceeded as exc:
+        db.rollback()
+        clear_development_code()
+        raise _rate_limit_error(exc) from exc
+
+    except (OtpError, AccountServiceError) as exc:
+        db.rollback()
+        clear_development_code()
+        raise _request_error(str(exc)) from exc
+
+    except RuntimeError as exc:
+        db.rollback()
+        clear_development_code()
+
+        if str(exc) != "Email delivery failed.":
+            raise
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Email delivery failed. Try again.",
+        ) from exc
 
 @router.post("/otp/verify", response_model=OtpVerifyResponse)
 def verify_otp(
@@ -159,6 +224,16 @@ def verify_otp(
     authorization: Annotated[str | None, Header()] = None,
 ) -> OtpVerifyResponse:
     """Verify registration, reset, step-up, or candidate identifier OTPs."""
+    # DEBUG: Verify OTP data
+    print("\n========== OTP VERIFY ==========")
+    print("OTP Code:", payload.code)
+    print("Challenge Id:", payload.challenge_id)
+    print("Purpose:", payload.purpose)
+    print("Action Class:", payload.action_class)
+    print("OTP Received:", bool(payload.code))
+    print("OTP Length:", len(payload.code))
+    print("Authorization Received:", bool(authorization))
+    print("===================================\n")
     try:
         grant = _verify_otp_by_purpose(payload, application, authorization)
         db.commit()
@@ -183,6 +258,15 @@ def login(
     application: Annotated[IdentityApplication, Depends(get_identity_application)],
 ) -> AccessTokenResponse:
     """Authenticate a global account and establish a browser session."""
+    # DEBUG: Check incoming login data
+    print("\n========== LOGIN REQUEST ==========")
+    print("Identifier:", payload.identifier)
+    print("Country Code:", payload.country_code)
+    print("Device ID:", payload.device_id)
+    print("Device Name:", payload.device_name)
+    print("Password Received:", bool(payload.password))
+    print("Password Length:", len(payload.password))
+    print("===================================\n")
     try:
         client_host = request.client.host if request.client is not None else ""
         user_agent = request.headers.get("user-agent", "")
@@ -225,6 +309,12 @@ def forgot_password(
 ) -> ChallengeAcceptedResponse:
     """Request password recovery without revealing account existence."""
     clear_development_code()
+    # DEBUG: Check incoming password recovery data
+    print("\n========== PASSWORD FORGOT REQUEST ==========")
+    print("Email:", str(payload.email))
+    print("Locale Code:", payload.locale_code)
+    print("Country Code:", payload.country_code)
+    print("===================================\n")
     try:
         challenge_id = application.recovery.request(
             email=str(payload.email),
@@ -246,6 +336,13 @@ def reset_password(
     application: Annotated[IdentityApplication, Depends(get_identity_application)],
 ) -> MessageResponse:
     """Consume a one-time grant and replace the account password."""
+    # DEBUG: Check incoming password reset data
+    print("\n========== PASSWORD RESET REQUEST ==========")
+    print("Grant Received:", bool(payload.grant))
+    print("New Password Received:", bool(payload.new_password))
+    print("New Password Length:", len(payload.new_password))
+    print("Locale Code:", payload.locale_code)
+    print("===================================\n")
     try:
         application.recovery.reset(
             raw_grant=payload.grant,
@@ -273,6 +370,14 @@ def request_step_up(
 ) -> ChallengeAcceptedResponse:
     """Request session-bound step-up authentication."""
     clear_development_code()
+    # DEBUG: Check incoming step-up request data
+    print("\n========== STEP-UP REQUEST ==========")
+    print("User ID:", context.user_id)
+    print("Session ID:", context.session_id)
+    print("Password Received:", bool(payload.password))
+    print("Password Length:", len(payload.password))
+    print("Locale Code:", payload.locale_code)
+    print("===================================\n")
     try:
         challenge_id = application.request_step_up(
             context=context,
@@ -308,6 +413,13 @@ def refresh_token(
     _require_cookie_csrf(request, csrf_cookie, csrf_header)
     if refresh_token is None:
         raise _auth_error()
+    # DEBUG: Check incoming token refresh data
+    print("\n========== TOKEN REFRESH ==========")
+    print("Refresh Cookie Received:", bool(refresh_token))
+    print("CSRF Cookie Received:", bool(csrf_cookie))
+    print("CSRF Header Received:", bool(csrf_header))
+    print("Origin:", request.headers.get("origin"))
+    print("===================================\n")
     try:
         pair = application.sessions.rotate(refresh_token)
         db.commit()
@@ -337,6 +449,13 @@ def logout(
 ) -> MessageResponse:
     """Revoke the current cookie session and clear browser credentials."""
     _require_cookie_csrf(request, csrf_cookie, csrf_header)
+    # DEBUG: Check incoming logout data
+    print("\n========== LOGOUT REQUEST ==========")
+    print("Refresh Cookie Received:", bool(refresh_token))
+    print("CSRF Cookie Received:", bool(csrf_cookie))
+    print("CSRF Header Received:", bool(csrf_header))
+    print("Origin:", request.headers.get("origin"))
+    print("===================================\n")
     if refresh_token is not None:
         application.sessions.revoke_by_refresh_token(refresh_token)
     db.commit()

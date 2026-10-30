@@ -52,8 +52,8 @@ class ProductService:
         price: Decimal,
         currency: str,
         images: list[UploadFile],
-        embedding_service: EmbeddingService,
-        vector_service: VectorService,
+        embedding_service: EmbeddingService | None = None,
+        vector_service: VectorService | None = None,
         gtin: str | None = None,
     ):
         """Persist a vendor product and index each uploaded image.
@@ -170,8 +170,8 @@ class ProductService:
         self,
         product,
         images: list[UploadFile],
-        embedding_service: EmbeddingService,
-        vector_service: VectorService,
+        embedding_service: EmbeddingService | None,
+        vector_service: VectorService | None,
         saved_paths: list[Path],
     ) -> None:
         """Save uploads and upsert image vectors for a product.
@@ -191,16 +191,17 @@ class ProductService:
                 image_url=stored.url,
                 is_primary=index == 0,
             )
-            pil_image = read_rgb_image(upload, self._max_upload_bytes)
-            vector = embedding_service.embed(pil_image)
-            vector_service.upsert_product_image(
-                vector=vector,
-                product_id=product.id,
-                image_id=product_image.id,
-                category=product.category,
-                brand=product.brand,
-                source=product.source,
-            )
+            if embedding_service is not None and vector_service is not None:
+                pil_image = read_rgb_image(upload, self._max_upload_bytes)
+                vector = embedding_service.embed(pil_image)
+                vector_service.upsert_product_image(
+                    vector=vector,
+                    product_id=product.id,
+                    image_id=product_image.id,
+                    category=product.category,
+                    brand=product.brand,
+                    source=product.source,
+                )
 
     def get_product(self, product_id: int):
         """Return one product or raise when missing.

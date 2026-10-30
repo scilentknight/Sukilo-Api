@@ -21,7 +21,7 @@ from app.modules.identity.notifications import (
     NotificationSender,
     SecurityNotification,
 )
-from app.modules.identity.otp import OtpService
+from app.modules.identity.otp import OtpError, OtpService
 from app.modules.identity.passwords import PasswordHasher
 from app.modules.identity.rate_limits import RateLimitPolicy, RateLimiter
 from app.modules.identity.sessions import SessionService, TokenPair
@@ -280,7 +280,10 @@ class RegistrationService:
         )
         if existing is not None:
             if existing.status != AccountStatus.PENDING:
-                return new_uuid()
+                raise AccountConflictError(
+                "IAM_EMAIL_ALREADY_REGISTERED",
+                "This email is already registered. Please log in.",
+                )
             existing.password_hash = password_hash
             self.account_repository.flush()
             return self.otp.request(
@@ -301,7 +304,10 @@ class RegistrationService:
             phone_owner = self.account_repository.get_by_phone(normalized_phone)
             if phone_owner is not None:
                 if phone_owner.status != AccountStatus.PENDING:
-                    return new_uuid()
+                    raise AccountConflictError(
+                    "IAM_PHONE_ALREADY_REGISTERED",
+                    "This phone number is already registered.",
+                    )
                 phone_owner.email = normalized_email
                 phone_owner.password_hash = password_hash
                 self.account_repository.flush()
@@ -312,20 +318,87 @@ class RegistrationService:
                     purpose=OtpPurpose.REGISTER,
                     locale_code=locale_code,
                 )
-        try:
-            account = self.accounts.create_pending_local_account(
-                email=normalized_email,
-                phone_e164=phone_e164,
-                password_hash=password_hash,
-            )
-        except AccountConflictError:
-            return new_uuid()
+        account = self.accounts.create_pending_local_account(
+        email=normalized_email,
+        phone_e164=phone_e164,
+        password_hash=password_hash,
+        )
         return self.otp.request(
             user_id=account.user_id,
             destination=account.email or email,
             channel=OtpChannel.EMAIL,
             purpose=OtpPurpose.REGISTER,
             locale_code=locale_code,
+        )
+
+    def resend_registration_otp(
+        self,
+        challenge_id: UUID,
+    ) -> UUID:
+        """Resend an OTP for an existing pending registration."""
+        # This method will:
+        # 1. Retrieve the existing challenge.
+        # 2. Validate REGISTER purpose.
+        # 3. Find the associated pending account.
+        # 4. Request a new OTP.
+        # 5. Return the new challenge ID.
+
+        # Retrieve and lock the original challenge.
+        challenge = self.otp.repository.get_for_update(challenge_id)
+
+        # Validate the original registration challenge.
+        if (
+        challenge is None
+        or challenge.purpose != OtpPurpose.REGISTER
+        or challenge.channel != OtpChannel.EMAIL
+        or challenge.user_id is None
+        or challenge.verified_at is not None
+        or challenge.invalidated_at is not None
+    ):
+            raise AccountValidationError(
+            "IAM_REGISTRATION_INVALID",
+            "Registration challenge is unavailable.",
+        )
+
+         # Retrieve and lock the associated account.
+        account = self.account_repository.get_by_id(
+        challenge.user_id,
+        for_update=True,
+    )
+
+       # Only pending accounts with an email can receive registration OTPs.
+        if (
+        account is None
+        or account.status != AccountStatus.PENDING
+        or not account.email
+    ):
+            raise AccountValidationError(
+            "IAM_REGISTRATION_INVALID",
+            "Registration challenge is unavailable.",
+        ) 
+
+         # Ensure the original challenge belongs to the account's current email.
+        expected_destination_hash = self.otp.digests.digest(
+        "otp-destination",
+        account.email,
+    )
+
+        if challenge.destination_hash != expected_destination_hash:
+            raise AccountValidationError(
+            "IAM_REGISTRATION_INVALID",
+            "Registration challenge is unavailable.",
+        )   
+
+ # Create and deliver a completely new OTP.
+        return self.otp.request(
+        user_id=account.user_id,
+        destination=account.email,
+        channel=OtpChannel.EMAIL,
+        purpose=OtpPurpose.REGISTER,
+        locale_code="en",
+    )
+        raise NotImplementedError(
+            "Implement after confirming OtpRepository methods."
         )
 
     def verify_registration(self, otp_id: UUID, code: str) -> UserAccount:

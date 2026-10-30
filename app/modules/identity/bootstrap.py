@@ -374,10 +374,11 @@ def _build_digest_service(
         return DigestService(active_key_id="v1", peppers={"v1": pepper})
     if production:
         raise ValueError("AUTH_DIGEST_PEPPER_REFERENCE is required in production.")
-    logger.warning("Using ephemeral AUTH digest pepper for non-production.")
+    logger.info("Using stable development AUTH digest pepper.")
+    dev_pepper = b"sukilo-stable-dev-digest-pepper-secret-32b"
     return DigestService(
         active_key_id="dev",
-        peppers={"dev": os.urandom(32)},
+        peppers={"dev": dev_pepper, "v1": dev_pepper},
     )
 
 

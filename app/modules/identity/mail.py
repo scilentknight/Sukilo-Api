@@ -1,3 +1,4 @@
+from app.core.config import settings
 """Deliver authentication mail without logging message contents."""
 
 import logging
@@ -100,6 +101,8 @@ class SmtpNotificationSender:
             )
             return
         self._send(_otp_message(notification, self.sender), notification.purpose.value)
+        if settings.APP_ENV.casefold() != "production":
+            remember_development_code(notification.code)
 
     def send_security(self, notification: SecurityNotification) -> None:
         """Email one security notice."""

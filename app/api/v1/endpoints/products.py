@@ -35,8 +35,8 @@ def create_product(
     gtin: str | None = Form(None),
     images: list[UploadFile] = File(...),
     service: ProductService = Depends(get_product_service),
-    embedding_service: EmbeddingService = Depends(get_embedding_service),
-    vector_service: VectorService = Depends(get_vector_service),
+    embedding_service: EmbeddingService | None = Depends(get_embedding_service),
+    vector_service: VectorService | None = Depends(get_vector_service),
 ) -> ProductRead:
     """Create a vendor product, store images, and index vectors in Qdrant."""
     product = service.create_vendor_product(
